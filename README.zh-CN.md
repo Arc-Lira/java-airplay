@@ -4,12 +4,12 @@
 
 [![GitHub Stars](https://img.shields.io/github/stars/Arc-Lira/java-airplay?style=flat-square)](https://github.com/Arc-Lira/java-airplay/stargazers)
 [![Java 25](https://img.shields.io/badge/Java-25-blue?style=flat-square)](https://jdk.java.net/25/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6?style=flat-square)](https://github.com/Arc-Lira/java-airplay)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20ARM64-0078D6?style=flat-square)](https://github.com/Arc-Lira/java-airplay)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
 [English](README.md) · [Issues](https://github.com/Arc-Lira/java-airplay/issues) · [Releases](https://github.com/Arc-Lira/java-airplay/releases)
 
-这是一个基于 Java 25 的 Windows 桌面 AirPlay 接收器，用于在局域网接收 iPhone 屏幕镜像。项目支持 H.264 视频、ALAC/AAC-ELD 音频，并通过 GStreamer 提供可选的实验性 HEVC 支持。
+这是一个基于 Java 25 的 Windows 桌面 AirPlay 接收器，支持 Windows x64 与 Windows ARM64，用于在局域网接收 iPhone 屏幕镜像。项目支持 H.264 视频、ALAC/AAC-ELD 音频，并通过 GStreamer 提供可选的实验性 HEVC 支持。
 
 ## 核心能力
 
@@ -18,7 +18,7 @@
 | 屏幕镜像 | 通过传统 AirPlay 传输接收 iPhone 屏幕镜像 |
 | 音视频接收 | H.264 视频与 ALAC/AAC-ELD 音频 |
 | 实验性 HEVC | 通过 GStreamer 后端提供可选 H.265 支持 |
-| 硬件解码 | 自动选择或手动选择 Windows DXGI GPU 适配器 |
+| 硬件解码 | 按 Windows DXGI GPU 自动选择 D3D12、D3D11 或 NVDEC，并回退到软件解码 |
 | 稳定播放 | 默认保留编码参考帧，并在拥塞时使用 TCP 背压 |
 | 自适应显示 | 自动检测实际分辨率、帧率和编码格式，支持竖屏视频 |
 | 桌面体验 | 中英文界面、独立视频窗口、全屏、系统托盘和主题支持 |
@@ -27,16 +27,16 @@
 
 ### 使用发行包
 
-Windows x64 发行包内置精简版 Java 25 runtime、GStreamer、启动脚本、配置文件和文档，无需另外安装 Java 或 GStreamer。
+请下载与电脑架构匹配的 ZIP：Intel/AMD 使用 `windows-x64`，Windows on ARM 与骁龙 X Elite 使用 `windows-arm64`。每个包都内置精简版 Java 25 runtime、GStreamer、启动脚本、配置文件和文档，无需另外安装 Java 或 GStreamer。
 
-1. 解压发行 ZIP 文件。
+1. 解压对应架构的发行 ZIP 文件。
 2. 运行 `start.bat`。
 3. 在 iPhone 上打开控制中心。
 4. 选择“屏幕镜像”，然后选择程序中显示的接收器名称。
 
 ### 从源码运行
 
-从源码构建需要 Windows、JDK 25，以及用于下载 Gradle 依赖的网络连接。启动脚本可以准备项目内的 GStreamer runtime。
+从源码构建需要 Windows x64 或 ARM64、JDK 25，以及用于下载 Gradle 依赖的网络连接。启动脚本会按当前架构准备项目内的 GStreamer runtime。
 
 ```powershell
 ./gradlew.bat test
@@ -47,7 +47,7 @@ start.bat
 可执行 JAR 生成位置：
 
 ```text
-player/app/build/libs/java-airplay-server-1.0.9.jar
+player/app/build/libs/java-airplay-server-1.1.0.jar
 ```
 
 ## 桌面界面
@@ -100,7 +100,7 @@ ${user.home}/.java-airplay/application.properties
 ./gradlew.bat :player:app:bootJar
 ```
 
-在 Windows x64 环境中从项目根目录构建完整发行包：
+在 Windows 环境中从项目根目录同时构建 x64 与 ARM64 发行包：
 
 ```powershell
 ./gradlew.bat release
@@ -111,9 +111,11 @@ ${user.home}/.java-airplay/application.properties
 ```text
 release/java-airplay-<version>.<yyMMdd>-windows-x64.zip
 release/java-airplay-<version>.<yyMMdd>-windows-x64.zip.sha256
+release/java-airplay-<version>.<yyMMdd>-windows-arm64.zip
+release/java-airplay-<version>.<yyMMdd>-windows-arm64.zip.sha256
 ```
 
-`release` 任务仅支持 Windows，会将可执行 JAR、精简版 Java runtime、GStreamer、启动脚本、可编辑配置、中英文文档和许可证打包到 ZIP 中。
+`release` 任务仅支持 Windows，可在 x64 或 ARM64 主机上运行，并分别为两种架构打包匹配的精简 Java runtime 与 GStreamer。也可使用 `releaseWindowsX64` 或 `releaseWindowsArm64` 只构建其中一个架构。首次构建 ARM64 包时会下载对应的 JDK jmods 和 GStreamer runtime。
 
 ## 模块
 

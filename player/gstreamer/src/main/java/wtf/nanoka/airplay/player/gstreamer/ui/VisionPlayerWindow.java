@@ -730,7 +730,7 @@ public final class VisionPlayerWindow implements AutoCloseable {
 
         decoderCombo = choiceCombo(new String[]{
                 "auto", "d3d12h264dec", "d3d11h264dec", "nvh264dec", "vulkanh264dec",
-                "avdec_h264", "vah264dec", "v4l2h264dec", "vtdec_hw"
+                "avdec_h264", "vah264dec", "v4l2slh264dec", "v4l2h264dec", "vtdec_hw"
         }, 210, true);
         decoderCombo.setSelectedItem(savedSettings.videoDecoder());
         settingsStack.add(settingRow("settings.videoDecoder", "settings.videoDecoder.description",

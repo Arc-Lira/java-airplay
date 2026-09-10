@@ -170,7 +170,7 @@ public class GstPlayerDefault extends GstPlayer {
             return new DecoderSelection(baseD3d12Decoder, null);
         }
         String nvDecoder = "nv" + codecToken + "dec";
-        if (elementExists(nvDecoder)) {
+        if (elementExists(nvDecoder) && elementExists("cudadownload")) {
             log.info("Automatically selected GStreamer {} decoder: {}", codec, nvDecoder);
             return new DecoderSelection(nvDecoder, null);
         }
@@ -188,9 +188,10 @@ public class GstPlayerDefault extends GstPlayer {
         }
 
         for (String candidate : new String[]{
-                "vulkan" + codecToken + "dec", "va" + codecToken + "dec",
-                "v4l2" + codecToken + "dec", "vtdec_hw"}) {
-            if (elementExists(candidate)) {
+                "vtdec_hw", "va" + codecToken + "dec",
+                "v4l2sl" + codecToken + "dec", "v4l2" + codecToken + "dec",
+                "vulkan" + codecToken + "dec"}) {
+            if (decoderAvailable(candidate)) {
                 log.info("Automatically selected GStreamer {} decoder: {}", codec, candidate);
                 return new DecoderSelection(candidate, null);
             }
@@ -245,8 +246,9 @@ public class GstPlayerDefault extends GstPlayer {
             return "cudadownload ! autovideosink sync=false";
         }
         if (decoder.startsWith("vulkanh26") && decoder.endsWith("dec")) {
+            requireElement("vulkancolorconvert", "Vulkan color conversion element");
             requireElement("vulkansink", "Vulkan video sink");
-            return "vulkansink sync=false";
+            return "vulkancolorconvert ! vulkansink sync=false";
         }
         return "autovideosink sync=false";
     }
@@ -323,6 +325,16 @@ public class GstPlayerDefault extends GstPlayer {
     private static boolean isD3dDecoder(String decoder, String api) {
         return (decoder.startsWith(api + "h264") || decoder.startsWith(api + "h265"))
                 && decoder.endsWith("dec");
+    }
+
+    private static boolean decoderAvailable(String decoder) {
+        if (!elementExists(decoder)) {
+            return false;
+        }
+        if (decoder.startsWith("vulkanh26") && decoder.endsWith("dec")) {
+            return elementExists("vulkancolorconvert") && elementExists("vulkansink");
+        }
+        return true;
     }
 
     private static boolean elementExists(String element) {

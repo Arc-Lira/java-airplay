@@ -23,7 +23,7 @@ allprojects {
     apply plugin: 'java'
 
     group = 'wtf.nanoka'
-    version = providers.gradleProperty('version').getOrElse('1.0.9')
+    version = providers.gradleProperty('version').getOrElse('1.1.0')
 
     repositories {
         mavenCentral()
@@ -67,110 +67,155 @@ wrapper {
 }
 
 def windows = System.getProperty('os.name').toLowerCase().contains('windows')
-def releaseRuntimeDirectory = layout.buildDirectory.dir('release/windows-x64/runtime')
-def localGStreamerDirectory = layout.projectDirectory.dir('.runtime/gstreamer')
 def releaseOutputDirectory = layout.projectDirectory.dir('release')
-// Release artifacts carry the current UTC build date as a yyMMdd suffix.
 def releaseBuildDate = providers.provider {
     new Date().format('yyMMdd', TimeZone.getTimeZone('UTC'))
 }
 def releaseVersion = releaseBuildDate.map { date -> "${project.version}.${date}" }
-def releaseBaseName = releaseVersion.map { value -> "java-airplay-${value}-windows-x64" }
-def releaseChecksumFile = providers.provider {
-    new File(releaseOutputDirectory.asFile, "${releaseBaseName.get()}.zip.sha256")
+def releaseJlinkModules = 'java.se,jdk.unsupported,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.localedata,jdk.charsets'
+def releaseJdkLauncher = javaToolchains.launcherFor {
+    languageVersion = JavaLanguageVersion.of(25)
 }
+def windowsReleaseArchitectures = [
+        [id: 'X64', gst: 'x86_64', zip: 'windows-x64'],
+        [id: 'Arm64', gst: 'arm64', zip: 'windows-arm64']
+]
+def releaseTestTasks = subprojects.collect { "${it.path}:test" }
 
-tasks.register('prepareGStreamerRuntime', Exec) {
-    group = 'distribution'
-    description = 'Checks or prepares the project-local Windows GStreamer runtime.'
-    doFirst {
-        if (!windows) {
-            throw new GradleException('The Windows x64 release must be built on Windows.')
-        }
-    }
-    commandLine 'powershell.exe', '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
-            '-File', layout.projectDirectory.file('scripts/bootstrap-runtime.ps1').asFile.absolutePath
-    outputs.upToDateWhen { false }
-}
-
-tasks.register('cleanReleaseJavaRuntime', Delete) {
-    group = 'distribution'
-    delete releaseRuntimeDirectory
-}
-
-tasks.register('createReleaseJavaRuntime', Exec) {
-    group = 'distribution'
-    description = 'Creates a compact Java 25 runtime for the Windows release.'
-    dependsOn 'cleanReleaseJavaRuntime'
-    def launcher = javaToolchains.launcherFor {
-        languageVersion = JavaLanguageVersion.of(25)
-    }
-    inputs.property('javaVersion', 25)
-    doFirst {
-        if (!windows) {
-            throw new GradleException('The Windows x64 release must be built on Windows.')
-        }
-        def javaHome = launcher.get().metadata.installationPath.asFile
-        executable = new File(javaHome, 'bin/jlink.exe').absolutePath
-        args '--add-modules', 'java.se,jdk.unsupported,jdk.crypto.ec,jdk.crypto.cryptoki,jdk.localedata,jdk.charsets',
-                '--strip-debug', '--no-header-files', '--no-man-pages', '--compress', 'zip-6',
-                '--output', releaseRuntimeDirectory.get().asFile.absolutePath
-    }
-}
-
-tasks.register('release', Zip) {
-    group = 'distribution'
-    description = 'Builds the complete, end-user-ready Windows x64 ZIP distribution.'
-    dependsOn ':player:app:bootJar', 'prepareGStreamerRuntime', 'createReleaseJavaRuntime',
-            subprojects.collect { "${it.path}:test" }
-
-    archiveFileName = releaseBaseName.map { "${it}.zip" }
-    destinationDirectory = releaseOutputDirectory
-    outputs.file(releaseChecksumFile)
-    zip64 = true
-    includeEmptyDirs = false
-
-    into(releaseBaseName) {
-        from(layout.projectDirectory.file("player/app/build/libs/java-airplay-server-${project.version}.jar"))
-        from('start.bat')
-        from('scripts') {
-            into 'scripts'
-        }
-        from('README.md', 'README.zh-CN.md', 'LICENSE')
-        from('config/application.example.properties') {
-            into 'config'
-        }
-        from('config/application.example.properties') {
-            into 'config'
-            rename { 'application.properties' }
-        }
-        from(releaseRuntimeDirectory) {
-            into 'runtime'
-        }
-        from(localGStreamerDirectory) {
-            into '.runtime/gstreamer'
-            include 'bin/**'
-            include 'lib/**/*.dll'
-            include 'libexec/**'
-            include 'etc/**'
-            include 'share/**'
-        }
+windowsReleaseArchitectures.each { arch ->
+    def runtimeDirectory = layout.buildDirectory.dir("release/${arch.zip}/runtime")
+    def gstreamerDirectory = arch.gst == 'x86_64'
+            ? layout.projectDirectory.dir('.runtime/gstreamer')
+            : layout.projectDirectory.dir(".runtime/gstreamer-${arch.gst}")
+    def jdkDirectory = layout.projectDirectory.dir(".runtime/jdk-windows-${arch.gst}")
+    def releaseBaseName = releaseVersion.map { value -> "java-airplay-${value}-${arch.zip}" }
+    def checksumFile = providers.provider {
+        new File(releaseOutputDirectory.asFile, "${releaseBaseName.get()}.zip.sha256")
     }
 
-    doLast {
-        def zipFile = archiveFile.get().asFile
-        def digest = java.security.MessageDigest.getInstance('SHA-256')
-        zipFile.withInputStream { input ->
-            byte[] buffer = new byte[1024 * 1024]
-            int read
-            while ((read = input.read(buffer)) != -1) {
-                digest.update(buffer, 0, read)
+    tasks.register("prepareGStreamerRuntime${arch.id}", Exec) {
+        group = 'distribution'
+        description = "Checks or prepares the project-local Windows ${arch.zip} GStreamer runtime."
+        doFirst {
+            if (!windows) {
+                throw new GradleException("The ${arch.zip} release must be built on Windows.")
             }
         }
-        def checksum = digest.digest().collect { String.format('%02x', it) }.join()
-        def checksumFile = releaseChecksumFile.get()
-        checksumFile.setText("${checksum}  ${zipFile.name}\n", 'UTF-8')
-        logger.lifecycle("Release created: ${zipFile}")
-        logger.lifecycle("SHA-256: ${checksum}")
+        commandLine 'powershell.exe', '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                '-File', layout.projectDirectory.file('scripts/bootstrap-runtime.ps1').asFile.absolutePath,
+                '-Architecture', arch.gst
+        outputs.upToDateWhen { false }
     }
+
+    tasks.register("prepareReleaseJdk${arch.id}", Exec) {
+        group = 'distribution'
+        description = "Prepares JDK 25 jmods for the ${arch.zip} runtime."
+        doFirst {
+            if (!windows) {
+                throw new GradleException("The ${arch.zip} release must be built on Windows.")
+            }
+        }
+        commandLine 'powershell.exe', '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                '-File', layout.projectDirectory.file('scripts/prepare-release-jdk.ps1').asFile.absolutePath,
+                '-Architecture', arch.gst
+        outputs.upToDateWhen { false }
+    }
+
+    tasks.register("cleanReleaseJavaRuntime${arch.id}", Delete) {
+        group = 'distribution'
+        delete runtimeDirectory
+    }
+
+    tasks.register("createReleaseJavaRuntime${arch.id}", Exec) {
+        group = 'distribution'
+        description = "Creates a compact Java 25 runtime for the ${arch.zip} release."
+        dependsOn "cleanReleaseJavaRuntime${arch.id}", "prepareReleaseJdk${arch.id}"
+        inputs.property('javaVersion', 25)
+        inputs.property('architecture', arch.gst)
+        doFirst {
+            if (!windows) {
+                throw new GradleException("The ${arch.zip} release must be built on Windows.")
+            }
+            def hostJavaHome = releaseJdkLauncher.get().metadata.installationPath.asFile
+            def jmods = new File(jdkDirectory.asFile, 'jmods')
+            if (!jmods.directory) {
+                throw new GradleException("Target JDK jmods were not found at ${jmods}.")
+            }
+            executable = new File(hostJavaHome, 'bin/jlink.exe').absolutePath
+            args '--module-path', jmods.absolutePath,
+                    '--add-modules', releaseJlinkModules,
+                    '--ignore-signing-information',
+                    '--strip-debug', '--no-header-files', '--no-man-pages', '--compress', 'zip-6',
+                    '--output', runtimeDirectory.get().asFile.absolutePath
+        }
+    }
+
+    tasks.register("releaseWindows${arch.id}", Zip) {
+        group = 'distribution'
+        description = "Builds the complete, end-user-ready ${arch.zip} ZIP distribution."
+        dependsOn ':player:app:bootJar', "prepareGStreamerRuntime${arch.id}",
+                "createReleaseJavaRuntime${arch.id}", releaseTestTasks
+
+        archiveFileName = releaseBaseName.map { "${it}.zip" }
+        destinationDirectory = releaseOutputDirectory
+        outputs.file(checksumFile)
+        zip64 = true
+        includeEmptyDirs = false
+
+        into(releaseBaseName) {
+            from(layout.projectDirectory.file("player/app/build/libs/java-airplay-server-${project.version}.jar"))
+            from('start.bat')
+            from('scripts') {
+                into 'scripts'
+            }
+            from('README.md', 'README.zh-CN.md', 'LICENSE')
+            from('config/application.example.properties') {
+                into 'config'
+            }
+            from('config/application.example.properties') {
+                into 'config'
+                rename { 'application.properties' }
+            }
+            from(runtimeDirectory) {
+                into 'runtime'
+            }
+            from(gstreamerDirectory) {
+                into '.runtime/gstreamer'
+                include 'bin/**'
+                include 'lib/**/*.dll'
+                include 'libexec/**'
+                include 'etc/**'
+                include 'share/**'
+            }
+        }
+
+        doLast {
+            def zipFile = archiveFile.get().asFile
+            def digest = java.security.MessageDigest.getInstance('SHA-256')
+            zipFile.withInputStream { input ->
+                byte[] buffer = new byte[1024 * 1024]
+                int read
+                while ((read = input.read(buffer)) != -1) {
+                    digest.update(buffer, 0, read)
+                }
+            }
+            def checksum = digest.digest().collect { String.format('%02x', it) }.join()
+            def output = checksumFile.get()
+            output.setText("${checksum}  ${zipFile.name}\n", 'UTF-8')
+            logger.lifecycle("Release created: ${zipFile}")
+            logger.lifecycle("SHA-256: ${checksum}")
+        }
+    }
+}
+
+tasks.register('prepareGStreamerRuntime') {
+    group = 'distribution'
+    description = 'Checks or prepares the project-local Windows x64 GStreamer runtime.'
+    dependsOn 'prepareGStreamerRuntimeX64'
+}
+
+tasks.register('release') {
+    group = 'distribution'
+    description = 'Builds the complete Windows x64 and ARM64 ZIP distributions.'
+    dependsOn 'releaseWindowsX64', 'releaseWindowsArm64'
 }

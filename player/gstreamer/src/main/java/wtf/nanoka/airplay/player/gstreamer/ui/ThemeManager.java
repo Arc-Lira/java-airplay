@@ -148,7 +148,7 @@ final class ThemeManager implements AutoCloseable {
 
     private static boolean detectSystemDarkTheme(boolean allowExternalCommands) {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        if (os.contains("win")) {
+        if (os.contains("windows")) {
             Object desktopProperty = Toolkit.getDefaultToolkit().getDesktopProperty("win.darkMode.on");
             if (desktopProperty instanceof Boolean darkMode) {
                 return darkMode;

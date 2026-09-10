@@ -2,6 +2,8 @@
 
 [CmdletBinding()]
 param(
+    [ValidateSet('x86_64', 'arm64')]
+    [string]$Architecture,
     [switch]$CheckOnly,
     [switch]$ForceDownload
 )
@@ -11,13 +13,19 @@ $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $GStreamerVersion = '1.28.5'
-$GStreamerUrl = "https://gstreamer.freedesktop.org/data/pkg/windows/$GStreamerVersion/msvc/gstreamer-1.0-msvc-x86_64-$GStreamerVersion.exe"
-$GStreamerSha256 = '51ee5eaec33008e8409d8cf6f6884457f22aa3bd515f8856f993a3eaab903530'
+$GStreamerPackages = @{
+    x86_64 = @{
+        File   = "gstreamer-1.0-msvc-x86_64-$GStreamerVersion.exe"
+        Sha256 = '51ee5eaec33008e8409d8cf6f6884457f22aa3bd515f8856f993a3eaab903530'
+    }
+    arm64  = @{
+        File   = "gstreamer-1.0-msvc-arm64-$GStreamerVersion.exe"
+        Sha256 = 'c079ce6a64d182ea5648ec993033dfcbf8d073c542f2c596427991331a38dc27'
+    }
+}
 $Workspace = Split-Path -Parent $PSScriptRoot
 $RuntimeRoot = Join-Path $Workspace '.runtime'
-$InstallRoot = Join-Path $RuntimeRoot 'gstreamer'
 $DownloadRoot = Join-Path $RuntimeRoot 'downloads'
-$Installer = Join-Path $DownloadRoot "gstreamer-$GStreamerVersion.exe"
 $EmbeddedJava = Join-Path $Workspace 'runtime\bin\java.exe'
 $JavaExecutable = if (Test-Path -LiteralPath $EmbeddedJava) {
     (Resolve-Path -LiteralPath $EmbeddedJava).Path
@@ -26,53 +34,131 @@ $JavaExecutable = if (Test-Path -LiteralPath $EmbeddedJava) {
     if ($javaCommand) { $javaCommand.Source } else { $null }
 }
 
-function Test-Java25 {
+function Get-PeArchitecture([string]$Path) {
+    if (!(Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    try {
+        $reader = New-Object System.IO.BinaryReader $stream
+        if ($reader.ReadUInt16() -ne 0x5A4D) {
+            return $null
+        }
+        $null = $stream.Seek(0x3C, [System.IO.SeekOrigin]::Begin)
+        $peOffset = $reader.ReadInt32()
+        $null = $stream.Seek($peOffset, [System.IO.SeekOrigin]::Begin)
+        if ($reader.ReadUInt32() -ne 0x00004550) {
+            return $null
+        }
+        switch ($reader.ReadUInt16()) {
+            0x8664 { return 'x86_64' }
+            0xAA64 { return 'arm64' }
+            default { return $null }
+        }
+    } finally {
+        $stream.Dispose()
+    }
+}
+
+function ConvertTo-GStreamerArchitecture([string]$Value) {
+    switch -Regex ($Value.ToLowerInvariant()) {
+        '^(amd64|x86_64|x64)$' { return 'x86_64' }
+        '^(aarch64|arm64)$' { return 'arm64' }
+        default { return $null }
+    }
+}
+
+function Get-JavaArchitecture {
     if (!$JavaExecutable) {
         throw 'Java was not found. Use a complete release package or install JDK 25.'
     }
     try {
-        $versionOutput = (& cmd.exe /d /c "`"$JavaExecutable`" -version 2>&1" | Out-String)
+        $settingsOutput = (& cmd.exe /d /c "`"$JavaExecutable`" -XshowSettings:properties -version 2>&1" | Out-String)
     } catch {
         throw "Unable to execute Java at '$JavaExecutable'."
     }
     if ($LASTEXITCODE -ne 0) {
         throw "Unable to execute Java at '$JavaExecutable'."
     }
-    if ($versionOutput -notmatch 'version\s+"25(\.|\")') {
-        throw "Java 25 is required. Current output: $($versionOutput.Trim())"
+    if ($settingsOutput -notmatch 'version\s+"25(\.|\")') {
+        throw "Java 25 is required. Current output: $($settingsOutput.Trim())"
     }
-    Write-Host "[OK] Java 25 is available at $JavaExecutable." -ForegroundColor Green
+    $detected = $null
+    if ($settingsOutput -match 'os\.arch\s*=\s*(\S+)') {
+        $detected = ConvertTo-GStreamerArchitecture $Matches[1]
+    }
+    if (!$detected) {
+        $detected = Get-PeArchitecture $JavaExecutable
+    }
+    if (!$detected) {
+        throw "Unable to determine the architecture of Java at '$JavaExecutable'."
+    }
+    Write-Host "[OK] Java 25 ($detected) is available at $JavaExecutable." -ForegroundColor Green
+    return $detected
 }
 
-function Find-GStreamerBin([string]$Root) {
+function Find-GStreamerBin([string]$Root, [string]$RequiredArchitecture) {
+    $abi = "msvc_$RequiredArchitecture"
     $candidates = @(
         (Join-Path $Root 'bin'),
-        (Join-Path $Root '1.0\msvc_x86_64\bin'),
-        (Join-Path $Root 'msvc_x86_64\bin')
+        (Join-Path $Root "1.0\$abi\bin"),
+        (Join-Path $Root "$abi\bin")
     )
     foreach ($candidate in $candidates) {
-        if (Test-Path -LiteralPath (Join-Path $candidate 'gst-inspect-1.0.exe')) {
-            return (Resolve-Path -LiteralPath $candidate).Path
+        $inspect = Join-Path $candidate 'gst-inspect-1.0.exe'
+        if (!(Test-Path -LiteralPath $inspect)) {
+            continue
         }
+        $actual = Get-PeArchitecture $inspect
+        if ($actual -and $actual -ne $RequiredArchitecture) {
+            continue
+        }
+        return (Resolve-Path -LiteralPath $candidate).Path
     }
     return $null
 }
 
-function Find-SystemGStreamerBin {
-    $roots = @(
-        [Environment]::GetEnvironmentVariable('GSTREAMER_1_0_ROOT_MSVC_X86_64', 'Process'),
-        [Environment]::GetEnvironmentVariable('GSTREAMER_1_0_ROOT_MSVC_X86_64', 'User'),
-        [Environment]::GetEnvironmentVariable('GSTREAMER_1_0_ROOT_MSVC_X86_64', 'Machine')
+function Find-LocalGStreamerBin([string]$RequiredArchitecture) {
+    $roots = @()
+    if ($RequiredArchitecture -eq 'arm64') {
+        $roots += (Join-Path $RuntimeRoot 'gstreamer-arm64')
+        $roots += (Join-Path $RuntimeRoot 'gstreamer')
+    } else {
+        $roots += (Join-Path $RuntimeRoot 'gstreamer')
+        $roots += (Join-Path $RuntimeRoot 'gstreamer-x86_64')
+    }
+    foreach ($root in $roots) {
+        $bin = Find-GStreamerBin $root $RequiredArchitecture
+        if ($bin) { return $bin }
+    }
+    return $null
+}
+
+function Find-SystemGStreamerBin([string]$RequiredArchitecture) {
+    $suffix = $RequiredArchitecture.ToUpperInvariant()
+    $names = @(
+        "GSTREAMER_1_0_ROOT_MSVC_$suffix",
+        "GSTREAMER_1_0_ROOT_$suffix"
     )
+    if ($RequiredArchitecture -eq 'x86_64') {
+        $names += 'GSTREAMER_1_0_ROOT_MINGW_X86_64'
+    }
+    $roots = @()
+    foreach ($name in $names) {
+        $roots += [Environment]::GetEnvironmentVariable($name, 'Process')
+        $roots += [Environment]::GetEnvironmentVariable($name, 'User')
+        $roots += [Environment]::GetEnvironmentVariable($name, 'Machine')
+    }
+    $abi = "msvc_$RequiredArchitecture"
     if ($env:LOCALAPPDATA) {
-        $roots += (Join-Path $env:LOCALAPPDATA 'Programs\gstreamer\1.0\msvc_x86_64')
+        $roots += (Join-Path $env:LOCALAPPDATA "Programs\gstreamer\1.0\$abi")
     }
     if ($env:ProgramFiles) {
-        $roots += (Join-Path $env:ProgramFiles 'gstreamer\1.0\msvc_x86_64')
+        $roots += (Join-Path $env:ProgramFiles "gstreamer\1.0\$abi")
     }
     foreach ($root in $roots) {
         if (!$root) { continue }
-        $bin = Find-GStreamerBin $root
+        $bin = Find-GStreamerBin $root $RequiredArchitecture
         if ($bin) { return $bin }
     }
     return $null
@@ -97,8 +183,6 @@ function Get-ClashProxy {
 }
 
 function Test-GStreamerElement([string]$Inspect, [string]$Element) {
-    # Windows PowerShell 5.1 converts native stderr into error records. This local
-    # override lets a missing element return false instead of terminating the script.
     $ErrorActionPreference = 'Continue'
     & $Inspect $Element *> $null
     return $LASTEXITCODE -eq 0
@@ -133,10 +217,10 @@ function Test-GStreamerPlugins([string]$Bin) {
     Write-Host '[OK] Required GStreamer video and audio plugins are available.' -ForegroundColor Green
 }
 
-function Copy-SystemGStreamer([string]$SystemBin) {
+function Copy-SystemGStreamer([string]$SystemBin, [string]$InstallRoot) {
     $sourceRoot = Split-Path -Parent $SystemBin
-    if (!(Test-Path -LiteralPath $RuntimeRoot)) {
-        New-Item -ItemType Directory -Path $RuntimeRoot | Out-Null
+    if (!(Test-Path -LiteralPath $InstallRoot)) {
+        New-Item -ItemType Directory -Path $InstallRoot | Out-Null
     }
     Write-Host "Copying existing GStreamer runtime from '$sourceRoot' to '$InstallRoot'..."
     & robocopy $sourceRoot $InstallRoot /E /NFL /NDL /NJH /NJS /NP | Out-Null
@@ -145,22 +229,25 @@ function Copy-SystemGStreamer([string]$SystemBin) {
     }
 }
 
-function Install-GStreamer {
+function Install-GStreamer([string]$RequiredArchitecture, [string]$InstallRoot) {
+    $package = $GStreamerPackages[$RequiredArchitecture]
+    $url = "https://gstreamer.freedesktop.org/data/pkg/windows/$GStreamerVersion/msvc/$($package.File)"
+    $installer = Join-Path $DownloadRoot $package.File
     if (!(Test-Path -LiteralPath $DownloadRoot)) {
         New-Item -ItemType Directory -Path $DownloadRoot -Force | Out-Null
     }
     $proxy = Get-ClashProxy
-    if (!(Test-Path -LiteralPath $Installer) -or $ForceDownload) {
-        Write-Host "Downloading GStreamer $GStreamerVersion to '$Installer'..."
+    if (!(Test-Path -LiteralPath $installer) -or $ForceDownload) {
+        Write-Host "Downloading GStreamer $GStreamerVersion ($RequiredArchitecture) to '$installer'..."
         if ($proxy) {
-            Invoke-WebRequest -Uri $GStreamerUrl -OutFile $Installer -Proxy $proxy -UseBasicParsing
+            Invoke-WebRequest -Uri $url -OutFile $installer -Proxy $proxy -UseBasicParsing
         } else {
-            Invoke-WebRequest -Uri $GStreamerUrl -OutFile $Installer -UseBasicParsing
+            Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
         }
     }
-    $actualHash = (Get-FileHash -LiteralPath $Installer -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actualHash -ne $GStreamerSha256) {
-        throw "GStreamer installer checksum mismatch. Expected $GStreamerSha256 but got $actualHash."
+    $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $package.Sha256) {
+        throw "GStreamer installer checksum mismatch. Expected $($package.Sha256) but got $actualHash."
     }
     Write-Host '[OK] GStreamer installer checksum verified.' -ForegroundColor Green
 
@@ -168,30 +255,43 @@ function Install-GStreamer {
         New-Item -ItemType Directory -Path $InstallRoot -Force | Out-Null
     }
     $arguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', "/DIR=`"$InstallRoot`"")
-    $process = Start-Process -FilePath $Installer -ArgumentList $arguments -Wait -PassThru
+    $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru
     if ($process.ExitCode -ne 0) {
         throw "GStreamer installer failed with exit code $($process.ExitCode)."
     }
 }
 
-Test-Java25
-$localBin = Find-GStreamerBin $InstallRoot
-if (!$localBin -and $CheckOnly) {
-    throw "Project-local GStreamer is missing. Run '$PSScriptRoot\bootstrap-runtime.ps1' without -CheckOnly."
-}
-if (!$localBin) {
-    $systemBin = Find-SystemGStreamerBin
-    if ($systemBin -and !$ForceDownload) {
-        Copy-SystemGStreamer $systemBin
-    } else {
-        Install-GStreamer
+$JavaArchitecture = Get-JavaArchitecture
+if ($Architecture) {
+    if ($Architecture -ne $JavaArchitecture) {
+        Write-Host "[WARN] Packaging GStreamer $Architecture while Java is $JavaArchitecture." -ForegroundColor Yellow
     }
-    $localBin = Find-GStreamerBin $InstallRoot
+} else {
+    $Architecture = $JavaArchitecture
+}
+$InstallRoot = if ($Architecture -eq 'arm64') {
+    Join-Path $RuntimeRoot 'gstreamer-arm64'
+} else {
+    Join-Path $RuntimeRoot 'gstreamer'
+}
+
+$localBin = Find-LocalGStreamerBin $Architecture
+if (!$localBin -and $CheckOnly) {
+    throw "Project-local GStreamer ($Architecture) is missing. Run '$PSScriptRoot\bootstrap-runtime.ps1' without -CheckOnly."
 }
 if (!$localBin) {
-    throw "GStreamer installation completed but gst-inspect-1.0.exe was not found below '$InstallRoot'."
+    $systemBin = Find-SystemGStreamerBin $Architecture
+    if ($systemBin -and !$ForceDownload) {
+        Copy-SystemGStreamer $systemBin $InstallRoot
+    } else {
+        Install-GStreamer $Architecture $InstallRoot
+    }
+    $localBin = Find-GStreamerBin $InstallRoot $Architecture
+}
+if (!$localBin) {
+    throw "GStreamer installation completed but a $Architecture gst-inspect-1.0.exe was not found below '$InstallRoot'."
 }
 
 Test-GStreamerPlugins $localBin
-Write-Host "[OK] Project-local runtime: $localBin" -ForegroundColor Green
+Write-Host "[OK] Project-local $Architecture runtime: $localBin" -ForegroundColor Green
 Write-Output $localBin

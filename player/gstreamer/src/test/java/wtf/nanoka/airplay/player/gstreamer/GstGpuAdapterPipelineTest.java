@@ -73,4 +73,34 @@ class GstGpuAdapterPipelineTest {
             }
         }
     }
+
+    @Test
+    void convertsVulkanDecoderOutputForTheVideoSink() {
+        try {
+            GstPlayerUtils.configurePaths();
+            Gst.init(Version.of(1, 10), "VulkanPipelineTest");
+        } catch (Throwable error) {
+            Assumptions.assumeTrue(false, "Native GStreamer is unavailable: " + error.getMessage());
+        }
+        Assumptions.assumeTrue(elementAvailable("vulkanh264dec"),
+                "Vulkan H.264 decoding is unavailable");
+        Assumptions.assumeTrue(elementAvailable("vulkancolorconvert"),
+                "Vulkan color conversion is unavailable");
+        Assumptions.assumeTrue(elementAvailable("vulkansink"),
+                "Vulkan video output is unavailable");
+
+        String description = GstPlayerDefault.createPipelineDescription("vulkanh264dec", "auto");
+        assertTrue(description.contains("! vulkancolorconvert ! vulkansink"));
+        try (Pipeline ignored = (Pipeline) Gst.parseLaunch(description)) {
+            // Parsing verifies that the complete Vulkan chain can be linked.
+        }
+    }
+
+    private static boolean elementAvailable(String element) {
+        try {
+            return ElementFactory.find(element) != null;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
 }

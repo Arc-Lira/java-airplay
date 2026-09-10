@@ -47,17 +47,21 @@ class GstPlayerUtils {
                 }
             }
         } else if (Platform.isMac()) {
-            String gstPath = System.getProperty("gstreamer.path",
-                    "/Library/Frameworks/GStreamer.framework/Libraries/");
-            if (!gstPath.isEmpty()) {
-                String jnaPath = System.getProperty("jna.library.path", "").trim();
-                if (jnaPath.isEmpty()) {
-                    System.setProperty("jna.library.path", gstPath);
-                } else {
-                    System.setProperty("jna.library.path", jnaPath + File.pathSeparator + gstPath);
-                }
-            }
+            prependJnaLibraryPath(System.getProperty("gstreamer.path", findMacLocation()));
+        } else {
+            prependJnaLibraryPath(System.getProperty("gstreamer.path", ""));
+        }
+    }
 
+    private static void prependJnaLibraryPath(String gstPath) {
+        if (gstPath == null || gstPath.isBlank()) {
+            return;
+        }
+        String jnaPath = System.getProperty("jna.library.path", "").trim();
+        if (jnaPath.isEmpty()) {
+            System.setProperty("jna.library.path", gstPath);
+        } else {
+            System.setProperty("jna.library.path", jnaPath + File.pathSeparator + gstPath);
         }
     }
 
@@ -69,25 +73,57 @@ class GstPlayerUtils {
      * @return location or empty string
      */
     static String findWindowsLocation() {
-        if (Platform.is64Bit()) {
-            Stream<String> configuredLocations = Stream.of("GSTREAMER_1_0_ROOT_MSVC_X86_64",
-                            "GSTREAMER_1_0_ROOT_MINGW_X86_64",
-                            "GSTREAMER_1_0_ROOT_X86_64")
-                    .map(System::getenv)
-                    .filter(p -> p != null && !p.isBlank());
-            Stream<String> standardLocations = Stream.of(
-                            System.getenv("LOCALAPPDATA") == null ? null
-                                    : Path.of(System.getenv("LOCALAPPDATA"), "Programs", "gstreamer", "1.0", "msvc_x86_64").toString(),
-                            System.getenv("ProgramFiles") == null ? null
-                                    : Path.of(System.getenv("ProgramFiles"), "gstreamer", "1.0", "msvc_x86_64").toString())
-                    .filter(p -> p != null && !p.isBlank());
-            return Stream.concat(configuredLocations, standardLocations)
-                    .map(Path::of)
-                    .filter(Files::isDirectory)
-                    .map(path -> path.resolve("bin").toString() + File.separator)
-                    .findFirst().orElse("");
-        } else {
+        String architecture = windowsGStreamerArchitecture();
+        if (architecture == null) {
             return "";
         }
+        String environmentSuffix = architecture.toUpperCase();
+        Stream<String> configuredLocations = Stream.of(
+                        "GSTREAMER_1_0_ROOT_MSVC_" + environmentSuffix,
+                        "GSTREAMER_1_0_ROOT_" + environmentSuffix)
+                .map(System::getenv)
+                .filter(p -> p != null && !p.isBlank());
+        if ("X86_64".equals(environmentSuffix)) {
+            configuredLocations = Stream.concat(configuredLocations,
+                    Stream.of("GSTREAMER_1_0_ROOT_MINGW_X86_64").map(System::getenv)
+                            .filter(p -> p != null && !p.isBlank()));
+        }
+        String installDirectory = "msvc_" + architecture;
+        Stream<String> standardLocations = Stream.of(
+                        System.getenv("LOCALAPPDATA") == null ? null
+                                : Path.of(System.getenv("LOCALAPPDATA"), "Programs", "gstreamer", "1.0",
+                                installDirectory).toString(),
+                        System.getenv("ProgramFiles") == null ? null
+                                : Path.of(System.getenv("ProgramFiles"), "gstreamer", "1.0",
+                                installDirectory).toString())
+                .filter(p -> p != null && !p.isBlank());
+        return Stream.concat(configuredLocations, standardLocations)
+                .map(Path::of)
+                .filter(Files::isDirectory)
+                .map(path -> path.resolve("bin").toString() + File.separator)
+                .findFirst().orElse("");
+    }
+
+    static String findMacLocation() {
+        return Stream.of(
+                        "/Library/Frameworks/GStreamer.framework/Libraries/",
+                        "/opt/homebrew/lib",
+                        "/usr/local/lib")
+                .filter(path -> Files.isDirectory(Path.of(path)))
+                .findFirst()
+                .orElse("");
+    }
+
+    static String windowsGStreamerArchitecture() {
+        if (!Platform.is64Bit()) {
+            return null;
+        }
+        if (Platform.isARM()) {
+            return "arm64";
+        }
+        if (Platform.isIntel()) {
+            return "x86_64";
+        }
+        return null;
     }
 }
