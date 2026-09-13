@@ -269,6 +269,9 @@ if ($Architecture) {
 } else {
     $Architecture = $JavaArchitecture
 }
+if ($Architecture -eq 'arm64') {
+    Write-Host '[WARN] Windows ARM64 support is experimental. Please report logs, SoC/GPU details, and a short playback sample at https://github.com/Arc-Lira/java-airplay/issues' -ForegroundColor Yellow
+}
 $InstallRoot = if ($Architecture -eq 'arm64') {
     Join-Path $RuntimeRoot 'gstreamer-arm64'
 } else {

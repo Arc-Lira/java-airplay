@@ -17,4 +17,6 @@ release/java-airplay-<version>.<yyMMdd>-windows-arm64.zip.sha256
 
 Each ZIP contains the executable JAR, a compact Java 25 runtime for that architecture, the matching GStreamer runtime, startup scripts, editable configuration, bilingual documentation, and licenses. End users extract the ZIP that matches their PC and run `start.bat`; they do not need to install Java or GStreamer.
 
+The `windows-arm64` package is experimental. ARM users should open an issue with logs, SoC/GPU details, and a short playback sample: https://github.com/Arc-Lira/java-airplay/issues
+
 The large ZIP and checksum files are build artifacts and are excluded from Git.

@@ -1,5 +1,7 @@
 # Java AirPlay Receiver
 
+如果有需要指导帮助的也可以加 QQ 群[目前为开荒]：[289575702](https://qm.qq.com/q/rcnnxs8JLa)
+
 If this project is useful to you, please consider giving the repository a Star on GitHub. It helps more developers discover the project and supports continued development.
 
 [![GitHub Stars](https://img.shields.io/github/stars/Arc-Lira/java-airplay?style=flat-square)](https://github.com/Arc-Lira/java-airplay/stargazers)
@@ -28,6 +30,8 @@ Java 25 desktop receiver for iPhone Screen Mirroring on a local network. It runs
 ### Packaged Release
 
 Download the ZIP that matches the PC: `windows-x64` for Intel/AMD, or `windows-arm64` for Windows on ARM and Snapdragon X Elite. Each package includes a compact Java 25 runtime, GStreamer, startup scripts, configuration, and documentation. Java and GStreamer do not need to be installed separately.
+
+Windows ARM64 support is experimental. If you run it, please [open an issue](https://github.com/Arc-Lira/java-airplay/issues) with logs, SoC/GPU details, and a short playback sample.
 
 1. Extract the matching release ZIP.
 2. Run `start.bat`.

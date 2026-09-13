@@ -1,5 +1,7 @@
 # Java AirPlay 投屏接收器
 
+如果有需要指导帮助的也可以加 QQ 群[目前为开荒]：[289575702](https://qm.qq.com/q/rcnnxs8JLa)
+
 如果这个项目对你有帮助，欢迎在 GitHub 上给仓库点一个 Star。你的支持可以帮助更多开发者发现项目，也会鼓励持续改进。
 
 [![GitHub Stars](https://img.shields.io/github/stars/Arc-Lira/java-airplay?style=flat-square)](https://github.com/Arc-Lira/java-airplay/stargazers)
@@ -28,6 +30,8 @@
 ### 使用发行包
 
 请下载与电脑架构匹配的 ZIP：Intel/AMD 使用 `windows-x64`，Windows on ARM 与骁龙 X Elite 使用 `windows-arm64`。每个包都内置精简版 Java 25 runtime、GStreamer、启动脚本、配置文件和文档，无需另外安装 Java 或 GStreamer。
+
+Windows ARM64 目前处于实验阶段。如果你在使用，请到 [Issues](https://github.com/Arc-Lira/java-airplay/issues) 提交日志、SoC/GPU 信息和一段简短播放样本。
 
 1. 解压对应架构的发行 ZIP 文件。
 2. 运行 `start.bat`。
