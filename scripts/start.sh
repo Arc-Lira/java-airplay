@@ -5,7 +5,7 @@ WORKSPACE=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 if [ -z "${JAR_PATH:-}" ]; then
   JAR_PATH=$(ls -1 "$WORKSPACE"/java-airplay-server-*.jar "$WORKSPACE"/player/app/build/libs/java-airplay-server-*.jar 2>/dev/null | tail -n 1 || true)
 fi
-JAR_PATH=${JAR_PATH:-"$WORKSPACE/player/app/build/libs/java-airplay-server-1.1.0.jar"}
+JAR_PATH=${JAR_PATH:-"$WORKSPACE/player/app/build/libs/java-airplay-server-1.1.1.jar"}
 
 JAVA_VERSION=$(java -version 2>&1 | sed -n '1p')
 case "$JAVA_VERSION" in

@@ -3,7 +3,7 @@ package wtf.nanoka.airplay.player.gstreamer;
 import java.util.Locale;
 
 public enum VideoRenderMode {
-    BALANCED("balanced", "Balanced", "renderMode.balanced", 3, "downstream", true, true),
+    BALANCED("balanced", "Balanced", "renderMode.balanced", 6, "no", true, true),
     QUALITY("quality", "Quality", "renderMode.quality", 8, "no", true, false),
     LOW_LATENCY("low-latency", "Low latency", "renderMode.lowLatency", 1, "downstream", false, false);
 

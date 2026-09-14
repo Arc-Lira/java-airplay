@@ -51,7 +51,7 @@ start.bat
 可执行 JAR 生成位置：
 
 ```text
-player/app/build/libs/java-airplay-server-1.1.0.jar
+player/app/build/libs/java-airplay-server-1.1.1.jar
 ```
 
 ## 桌面界面

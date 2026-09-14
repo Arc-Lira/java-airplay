@@ -51,7 +51,7 @@ start.bat
 The executable JAR is generated at:
 
 ```text
-player/app/build/libs/java-airplay-server-1.1.0.jar
+player/app/build/libs/java-airplay-server-1.1.1.jar
 ```
 
 ## Desktop UI

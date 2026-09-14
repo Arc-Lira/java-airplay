@@ -23,7 +23,7 @@ allprojects {
     apply plugin: 'java'
 
     group = 'wtf.nanoka'
-    version = providers.gradleProperty('version').getOrElse('1.1.0')
+    version = providers.gradleProperty('version').getOrElse('1.1.1')
 
     repositories {
         mavenCentral()
