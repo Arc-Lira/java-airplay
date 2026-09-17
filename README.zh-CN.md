@@ -51,7 +51,7 @@ start.bat
 可执行 JAR 生成位置：
 
 ```text
-player/app/build/libs/java-airplay-server-1.1.1.jar
+player/app/build/libs/java-airplay-server-1.1.2.jar
 ```
 
 ## 桌面界面
@@ -83,6 +83,7 @@ ${user.home}/.java-airplay/application.properties
 | `airplay.fps` | `60` | 向发送端声明的最大帧率，实际发送帧率由时间戳测量 |
 | `airplay.requirePairing` | `true` | 接收媒体前是否要求完成 AirPlay 配对 |
 | `airplay.hevc` | `false` | 启用实验性 HEVC 协商 |
+| `airplay.networkInterface` | `auto` | AirPlay 发现使用的网卡；auto 会跳过虚拟网卡 |
 | `player.gstreamer.renderMode` | `balanced` | 选择 balanced、quality 或 low-latency 呈现模式 |
 | `player.gstreamer.videoQueueDepth` | `2` | Java 侧缓存的编码视频访问单元数量 |
 | `player.gstreamer.aggressiveFrameDropping` | `false` | 实验性模式，拥塞时丢弃编码帧 |

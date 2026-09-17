@@ -35,7 +35,7 @@ class VisionPlayerWindowVisualTest {
         try {
             var settings = new ReceiverSettings(
                     "Visual QA Receiver", "1920", "1080", "60", "identity.pem", 32,
-                    true, true, "gstreamer", true, true, "auto", "auto", 2, false, "balanced");
+                    true, true, "auto", "gstreamer", true, true, "auto", "auto", 2, false, "balanced");
             var controller = new SettingsController() {
                 @Override
                 public Path settingsFile() {

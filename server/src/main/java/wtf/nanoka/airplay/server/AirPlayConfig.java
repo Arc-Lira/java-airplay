@@ -1,6 +1,7 @@
 package wtf.nanoka.airplay.server;
 
 import lombok.Data;
+import wtf.nanoka.airplay.lib.NetworkInterfaceSelector;
 
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
@@ -15,6 +16,7 @@ public class AirPlayConfig {
     private int audioJitterPackets = 3;
     private boolean requirePairing = true;
     private boolean hevc = false;
+    private String networkInterface = "auto";
 
     public void validate() {
         if (serverName == null || serverName.isBlank()) {
@@ -32,6 +34,7 @@ public class AirPlayConfig {
         if (audioJitterPackets < 1 || audioJitterPackets > 64) {
             throw new IllegalArgumentException("airplay.audioJitterPackets must be between 1 and 64");
         }
+        NetworkInterfaceSelector.requireConfigured(networkInterface);
     }
 
     public int getResolvedWidth() {

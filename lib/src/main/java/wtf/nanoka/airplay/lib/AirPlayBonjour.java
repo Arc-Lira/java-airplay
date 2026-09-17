@@ -6,15 +6,11 @@ import lombok.extern.slf4j.Slf4j;
 import javax.jmdns.JmDNS;
 import javax.jmdns.ServiceInfo;
 import java.io.IOException;
-import java.net.Inet4Address;
 import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Predicate;
 
 /**
  * Registers airplay/airtunes service mdns
@@ -29,6 +25,7 @@ public class AirPlayBonjour {
     private final String serverName;
     private final AirPlayIdentity identity;
     private final boolean hevcEnabled;
+    private final String networkInterface;
 
     private final List<JmDNS> jmDNSList = new ArrayList<>();
 
@@ -39,33 +36,30 @@ public class AirPlayBonjour {
         List<JmDNS> startedServices = new ArrayList<>();
         String mac = identity.getDeviceId();
         try {
-            NetworkInterface.networkInterfaces()
-                    .filter(networkInterfaceFilter())
-                    .flatMap(NetworkInterface::inetAddresses)
-                    .filter(inetAddressFilter())
-                    .forEach(inetAddress -> {
-                        JmDNS jmDNS = null;
-                        try {
-                            jmDNS = JmDNS.create(inetAddress);
-                            jmDNS.registerService(ServiceInfo.create(serverName + AIRPLAY_SERVICE_TYPE,
-                                    serverName, airTunesPort, 0, 0, airPlayMDNSProps(mac)));
-                            log.info("{} service is registered on address {}, port {}", serverName + AIRPLAY_SERVICE_TYPE,
-                                    inetAddress.getHostAddress(), airTunesPort);
-
-                            String airTunesServerName = mac.replaceAll(":", "") + "@" + serverName;
-                            jmDNS.registerService(ServiceInfo.create(airTunesServerName + AIRTUNES_SERVICE_TYPE,
-                                    airTunesServerName, airTunesPort, 0, 0, airTunesMDNSProps()));
-                            log.info("{} service is registered on address {}, port {}", airTunesServerName + AIRTUNES_SERVICE_TYPE,
-                                    inetAddress.getHostAddress(), airTunesPort);
-                            startedServices.add(jmDNS);
-                        } catch (Exception e) {
-                            close(jmDNS);
-                            log.warn("Unable to register AirPlay services on {}: {}",
-                                    inetAddress.getHostAddress(), e.getMessage());
-                        }
-                    });
-            if (startedServices.isEmpty()) {
+            NetworkInterfaceSelector.Resolution resolution = NetworkInterfaceSelector.resolve(networkInterface);
+            resolution.warning().ifPresent(log::warn);
+            if (resolution.chosen() == null) {
                 throw new IOException("No network interface accepted the AirPlay Bonjour services");
+            }
+            InetAddress inetAddress = InetAddress.getByName(resolution.chosen().ipv4());
+            JmDNS jmDNS = null;
+            try {
+                jmDNS = JmDNS.create(inetAddress);
+                jmDNS.registerService(ServiceInfo.create(serverName + AIRPLAY_SERVICE_TYPE,
+                        serverName, airTunesPort, 0, 0, airPlayMDNSProps(mac)));
+                log.info("{} service is registered on {} ({})", serverName + AIRPLAY_SERVICE_TYPE,
+                        resolution.chosen().description(), airTunesPort);
+
+                String airTunesServerName = mac.replaceAll(":", "") + "@" + serverName;
+                jmDNS.registerService(ServiceInfo.create(airTunesServerName + AIRTUNES_SERVICE_TYPE,
+                        airTunesServerName, airTunesPort, 0, 0, airTunesMDNSProps()));
+                log.info("{} service is registered on {} ({})", airTunesServerName + AIRTUNES_SERVICE_TYPE,
+                        resolution.chosen().description(), airTunesPort);
+                startedServices.add(jmDNS);
+            } catch (Exception e) {
+                close(jmDNS);
+                throw new IOException("Unable to register AirPlay services on "
+                        + resolution.chosen().description() + ": " + e.getMessage(), e);
             }
             jmDNSList.addAll(startedServices);
         } catch (Exception e) {
@@ -141,20 +135,6 @@ public class AirPlayBonjour {
         airTunesMDNSProps.put("vn", "65537");
         airTunesMDNSProps.put("pk", identity.getPublicKeyHex());
         return airTunesMDNSProps;
-    }
-
-    private Predicate<NetworkInterface> networkInterfaceFilter() {
-        return networkInterface -> {
-            try {
-                return !networkInterface.isLoopback() && !networkInterface.isPointToPoint() && networkInterface.isUp();
-            } catch (SocketException e) {
-                return false;
-            }
-        };
-    }
-
-    private Predicate<InetAddress> inetAddressFilter() {
-        return inetAddress -> inetAddress instanceof Inet4Address /*|| inetAddress instanceof Inet6Address*/;
     }
 
 }

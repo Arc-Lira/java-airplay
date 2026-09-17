@@ -36,6 +36,7 @@ class UserSettingsControllerTest {
         }
         assertEquals("Living Room", properties.getProperty("airplay.serverName"));
         assertEquals("true", properties.getProperty("airplay.hevc"));
+        assertEquals("auto", properties.getProperty("airplay.networkInterface"));
         assertEquals("quality", properties.getProperty("player.gstreamer.renderMode"));
         assertEquals("true", properties.getProperty("player.gstreamer.aggressiveFrameDropping"));
         assertEquals("DEBUG", properties.getProperty("logging.level.wtf.nanoka"));
@@ -48,6 +49,7 @@ class UserSettingsControllerTest {
         ReceiverSettings invalid = new ReceiverSettings(
                 valid.serverName(), "12", valid.height(), valid.fps(), valid.identityFile(),
                 valid.audioJitterPackets(), valid.requirePairing(), valid.hevcEnabled(),
+                valid.networkInterface(),
                 valid.playerImplementation(), valid.trayEnabled(), valid.swingEnabled(),
                 valid.videoDecoder(), valid.gpuAdapter(), valid.videoQueueDepth(),
                 valid.aggressiveFrameDropping(), valid.renderMode());
@@ -80,7 +82,7 @@ class UserSettingsControllerTest {
         return new ReceiverSettings(
                 "Living Room", "3840", "2160", "60",
                 temporaryDirectory.resolve("identity.key").toString(), 4,
-                true, true, "gstreamer", true, true,
+                true, true, "auto", "gstreamer", true, true,
                 "d3d12h264dec", "0", 3, true, "quality");
     }
 }

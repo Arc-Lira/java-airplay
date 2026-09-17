@@ -1,5 +1,6 @@
 package wtf.nanoka.airplay.player.gstreamer.ui;
 
+import wtf.nanoka.airplay.lib.NetworkInterfaceSelector;
 import wtf.nanoka.airplay.lib.VideoStreamInfo;
 
 import javax.accessibility.AccessibleContext;
@@ -117,6 +118,7 @@ public final class VisionPlayerWindow implements AutoCloseable {
     private JSpinner audioJitterSpinner;
     private VisionToggle pairingToggle;
     private VisionToggle hevcToggle;
+    private JComboBox<NetworkAdapterChoice> networkInterfaceCombo;
     private JComboBox<String> playerImplementationCombo;
     private VisionToggle trayToggle;
     private VisionToggle swingToggle;
@@ -448,6 +450,7 @@ public final class VisionPlayerWindow implements AutoCloseable {
         setAccessibleName(fpsField, "settings.displayProfile");
         setAccessibleName(pairingToggle, "settings.securePairing");
         setAccessibleName(hevcToggle, "settings.hevc");
+        setAccessibleName(networkInterfaceCombo, "settings.networkInterface");
         setAccessibleName(playerImplementationCombo, "settings.player");
         setAccessibleName(renderModeCombo, "settings.renderMode");
         setAccessibleName(decoderCombo, "settings.videoDecoder");
@@ -709,6 +712,18 @@ public final class VisionPlayerWindow implements AutoCloseable {
         hevcToggle.setToolTipText(i18n.tr("settings.hevc.tooltip"));
         settingsStack.add(settingRow("settings.hevc", "settings.hevc.description", hevcToggle));
 
+        networkInterfaceCombo = new JComboBox<>();
+        networkInterfaceCombo.addItem(NetworkAdapterChoice.automatic(i18n));
+        NetworkInterfaceSelector.listAll().stream()
+                .map(adapter -> NetworkAdapterChoice.detected(adapter, i18n))
+                .forEach(networkInterfaceCombo::addItem);
+        networkInterfaceCombo.setFont(interfaceFont(12, Font.PLAIN));
+        networkInterfaceCombo.setPreferredSize(new Dimension(300, 34));
+        networkInterfaceCombo.setMinimumSize(new Dimension(180, 34));
+        selectNetworkInterface(savedSettings.networkInterface());
+        settingsStack.add(settingRow("settings.networkInterface", "settings.networkInterface.description",
+                networkInterfaceCombo));
+
         settingsStack.add(Box.createVerticalStrut(20));
         settingsStack.add(sectionLabel("settings.playback"));
         settingsStack.add(Box.createVerticalStrut(8));
@@ -922,6 +937,7 @@ public final class VisionPlayerWindow implements AutoCloseable {
                 (Integer) audioJitterSpinner.getValue(),
                 pairingToggle.isSelected(),
                 hevcToggle.isSelected(),
+                selectedNetworkInterface(),
                 Objects.toString(playerImplementationCombo.getSelectedItem(), "gstreamer"),
                 trayToggle.isSelected(),
                 swingToggle.isSelected(),
@@ -941,6 +957,7 @@ public final class VisionPlayerWindow implements AutoCloseable {
         audioJitterSpinner.setValue(settings.audioJitterPackets());
         pairingToggle.setSelected(settings.requirePairing());
         hevcToggle.setSelected(settings.hevcEnabled());
+        selectNetworkInterface(settings.networkInterface());
         playerImplementationCombo.setSelectedItem(settings.playerImplementation());
         trayToggle.setSelected(settings.trayEnabled());
         swingToggle.setSelected(settings.swingEnabled());
@@ -978,6 +995,23 @@ public final class VisionPlayerWindow implements AutoCloseable {
     private String selectedGpuAdapter() {
         GpuAdapterChoice selected = (GpuAdapterChoice) gpuAdapterCombo.getSelectedItem();
         return selected == null ? "auto" : selected.value();
+    }
+
+    private void selectNetworkInterface(String value) {
+        String normalized = NetworkInterfaceSelector.normalize(value);
+        for (int index = 0; index < networkInterfaceCombo.getItemCount(); index++) {
+            if (networkInterfaceCombo.getItemAt(index).matches(normalized)) {
+                networkInterfaceCombo.setSelectedIndex(index);
+                return;
+            }
+        }
+        networkInterfaceCombo.addItem(NetworkAdapterChoice.unavailable(normalized, i18n));
+        networkInterfaceCombo.setSelectedIndex(networkInterfaceCombo.getItemCount() - 1);
+    }
+
+    private String selectedNetworkInterface() {
+        NetworkAdapterChoice selected = (NetworkAdapterChoice) networkInterfaceCombo.getSelectedItem();
+        return selected == null ? NetworkInterfaceSelector.AUTO : selected.value();
     }
 
     private void updateSettingsAvailability() {
@@ -1429,6 +1463,38 @@ public final class VisionPlayerWindow implements AutoCloseable {
         @Override
         public int hashCode() {
             return language.hashCode();
+        }
+    }
+
+    private record NetworkAdapterChoice(String value, String labelKey, String labelArgs, I18n i18n) {
+
+        static NetworkAdapterChoice automatic(I18n i18n) {
+            return new NetworkAdapterChoice(NetworkInterfaceSelector.AUTO, "settings.nic.auto", null, i18n);
+        }
+
+        static NetworkAdapterChoice detected(NetworkInterfaceSelector.Adapter adapter, I18n i18n) {
+            return new NetworkAdapterChoice(adapter.id(), null, adapter.description(), i18n);
+        }
+
+        static NetworkAdapterChoice unavailable(String value, I18n i18n) {
+            return new NetworkAdapterChoice(value, "settings.nic.unavailable", value, i18n);
+        }
+
+        boolean matches(String configured) {
+            return value.equalsIgnoreCase(configured);
+        }
+
+        String displayLabel() {
+            if (labelKey == null) {
+                return labelArgs;
+            }
+            return MessageFormat.format(i18n.tr(labelKey),
+                    labelArgs == null ? new Object[0] : new Object[]{labelArgs});
+        }
+
+        @Override
+        public String toString() {
+            return displayLabel();
         }
     }
 

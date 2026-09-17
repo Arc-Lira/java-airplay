@@ -381,6 +381,7 @@ public final class UserSettingsController implements SettingsController {
         airPlay.setAudioJitterPackets(settings.audioJitterPackets());
         airPlay.setRequirePairing(settings.requirePairing());
         airPlay.setHevc(settings.hevcEnabled());
+        airPlay.setNetworkInterface(settings.networkInterface().trim());
         airPlay.validate();
         validateIdentityPath(airPlay.getIdentityFile());
 
@@ -441,6 +442,7 @@ public final class UserSettingsController implements SettingsController {
         properties.setProperty("airplay.audioJitterPackets", Integer.toString(settings.audioJitterPackets()));
         properties.setProperty("airplay.requirePairing", Boolean.toString(settings.requirePairing()));
         properties.setProperty("airplay.hevc", Boolean.toString(settings.hevcEnabled()));
+        properties.setProperty("airplay.networkInterface", settings.networkInterface().trim());
         properties.setProperty("player.implementation", settings.playerImplementation().trim());
         properties.setProperty("player.tray.enabled", Boolean.toString(settings.trayEnabled()));
         properties.setProperty("player.gstreamer.swing", Boolean.toString(settings.swingEnabled()));

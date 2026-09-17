@@ -42,6 +42,7 @@ class ConfigurationBindingTest {
         assertEquals(3, airPlay.getAudioJitterPackets());
         assertTrue(airPlay.isRequirePairing());
         assertEquals(false, airPlay.isHevc());
+        assertEquals("auto", airPlay.getNetworkInterface());
 
         assertEquals("gstreamer", player.getImplementation());
         assertTrue(player.getTray().isEnabled());
@@ -86,6 +87,13 @@ class ConfigurationBindingTest {
 
         player.getGstreamer().setGpuAdapter("not-a-number");
         assertThrows(IllegalArgumentException.class, player::validate);
+    }
+
+    @Test
+    void rejectsBlankNetworkInterface() {
+        var airPlay = new AirPlayConfig();
+        airPlay.setNetworkInterface(" ");
+        assertThrows(IllegalArgumentException.class, airPlay::validate);
     }
 
     @Test

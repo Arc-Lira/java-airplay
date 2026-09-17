@@ -48,6 +48,12 @@
       "description": "Advertise and receive experimental HEVC screen mirroring. Requires the GStreamer player."
     },
     {
+      "name": "airplay.networkInterface",
+      "type": "java.lang.String",
+      "defaultValue": "auto",
+      "description": "Network adapter advertised for AirPlay discovery, or auto to prefer a private LAN IPv4 and skip virtual adapters."
+    },
+    {
       "name": "player.implementation",
       "type": "java.lang.String",
       "defaultValue": "gstreamer",
@@ -91,6 +97,12 @@
     }
   ],
   "hints": [
+    {
+      "name": "airplay.networkInterface",
+      "values": [
+        { "value": "auto" }
+      ]
+    },
     {
       "name": "player.implementation",
       "values": [

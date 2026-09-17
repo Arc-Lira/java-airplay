@@ -132,6 +132,7 @@ public class PlayerConfig {
                 airPlayConfig.getAudioJitterPackets(),
                 airPlayConfig.isRequirePairing(),
                 airPlayConfig.isHevc(),
+                airPlayConfig.getNetworkInterface(),
                 playerProperties.getImplementation(),
                 playerProperties.getTray().isEnabled(),
                 gstreamer.isSwing(),

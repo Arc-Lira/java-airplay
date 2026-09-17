@@ -51,7 +51,7 @@ start.bat
 The executable JAR is generated at:
 
 ```text
-player/app/build/libs/java-airplay-server-1.1.1.jar
+player/app/build/libs/java-airplay-server-1.1.2.jar
 ```
 
 ## Desktop UI
@@ -83,6 +83,7 @@ Common settings:
 | `airplay.fps` | `60` | Declared maximum frame rate; the sender rate is measured from timestamps |
 | `airplay.requirePairing` | `true` | Require AirPlay pairing before accepting media |
 | `airplay.hevc` | `false` | Enable experimental HEVC negotiation |
+| `airplay.networkInterface` | `auto` | LAN adapter advertised for discovery; auto skips virtual NICs |
 | `player.gstreamer.renderMode` | `balanced` | Choose balanced, quality, or low-latency presentation |
 | `player.gstreamer.videoQueueDepth` | `2` | Number of encoded video access units buffered in Java |
 | `player.gstreamer.aggressiveFrameDropping` | `false` | Experimental mode that drops encoded frames under pressure |

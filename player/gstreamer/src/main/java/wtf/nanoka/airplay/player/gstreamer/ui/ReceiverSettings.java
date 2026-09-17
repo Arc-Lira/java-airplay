@@ -11,6 +11,7 @@ public record ReceiverSettings(
         int audioJitterPackets,
         boolean requirePairing,
         boolean hevcEnabled,
+        String networkInterface,
         String playerImplementation,
         boolean trayEnabled,
         boolean swingEnabled,
@@ -26,6 +27,7 @@ public record ReceiverSettings(
         Objects.requireNonNull(height, "height");
         Objects.requireNonNull(fps, "fps");
         Objects.requireNonNull(identityFile, "identityFile");
+        Objects.requireNonNull(networkInterface, "networkInterface");
         Objects.requireNonNull(playerImplementation, "playerImplementation");
         Objects.requireNonNull(videoDecoder, "videoDecoder");
         Objects.requireNonNull(gpuAdapter, "gpuAdapter");

@@ -22,7 +22,8 @@ public class AirPlayServer {
                     airPlayConfig.getWidth(), airPlayConfig.getHeight(), airPlayConfig.getFps());
             var identity = AirPlayIdentity.loadOrCreate(Path.of(airPlayConfig.getIdentityFile()));
             airPlayBonjour = new AirPlayBonjour(
-                    airPlayConfig.getServerName(), identity, airPlayConfig.isHevc());
+                    airPlayConfig.getServerName(), identity, airPlayConfig.isHevc(),
+                    airPlayConfig.getNetworkInterface());
             controlServer = new ControlServer(airPlayConfig, airPlayConsumer, identity);
         } catch (Exception e) {
             throw new IllegalStateException("Unable to initialize persistent AirPlay identity", e);

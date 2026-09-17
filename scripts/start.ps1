@@ -42,7 +42,7 @@ if (!$JarPath) {
         }
     }
     if (!$JarPath) {
-        $JarPath = Join-Path $libraryDirectory 'java-airplay-server-1.1.1.jar'
+        $JarPath = Join-Path $libraryDirectory 'java-airplay-server-1.1.2.jar'
     }
 }
 if (!(Test-Path -LiteralPath $JarPath)) {
