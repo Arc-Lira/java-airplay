@@ -10,19 +10,19 @@
       "name": "airplay.width",
       "type": "java.lang.String",
       "defaultValue": "1920",
-      "description": "Maximum advertised width, or auto to detect the sender video stream after setup."
+      "description": "Requested display width. auto advertises 1920, or 3840 with HEVC. Actual stream dimensions are always detected from the sender."
     },
     {
       "name": "airplay.height",
       "type": "java.lang.String",
       "defaultValue": "1080",
-      "description": "Maximum advertised height, or auto to detect the sender video stream after setup."
+      "description": "Requested display height. auto advertises 1080, or 2160 with HEVC. This is not the phone's physical screen resolution."
     },
     {
       "name": "airplay.fps",
       "type": "java.lang.String",
       "defaultValue": "60",
-      "description": "Maximum advertised frame rate, or auto to detect the sender video timestamps after setup."
+      "description": "Maximum requested frame rate. auto advertises 60 for both H.264 and HEVC. Actual sender frame rate is always measured from timestamps."
     },
     {
       "name": "airplay.identityFile",
@@ -51,7 +51,7 @@
       "name": "airplay.networkInterface",
       "type": "java.lang.String",
       "defaultValue": "auto",
-      "description": "Network adapter advertised for AirPlay discovery, or auto to prefer a private LAN IPv4 and skip virtual adapters."
+      "description": "Network adapter name or IPv4 address for AirPlay discovery. Auto prefers physical adapters and tries other addresses if Bonjour registration fails."
     },
     {
       "name": "player.implementation",

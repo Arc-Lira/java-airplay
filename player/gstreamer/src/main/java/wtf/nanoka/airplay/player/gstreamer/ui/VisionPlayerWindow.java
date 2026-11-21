@@ -103,6 +103,7 @@ public final class VisionPlayerWindow implements AutoCloseable {
     private VisionLabel idleTitle;
     private VisionLabel idleSubtitle;
     private VisionLabel videoDetails;
+    private String videoError;
     private ThemeSelector themeSelector;
     private JPanel receiverChips;
     private JPanel settingsStack;
@@ -222,6 +223,7 @@ public final class VisionPlayerWindow implements AutoCloseable {
             connectionState = ConnectionState.CONNECTING;
             currentVideoStream = streamInfo;
             updateVideoAspect(streamInfo);
+            updateVideoDetails(streamInfo);
             statusChip.setState(ConnectionState.CONNECTING);
             idleTitle.setText(i18n.tr("receiver.preparing"));
             idleSubtitle.setText(i18n.tr("receiver.connecting"));
@@ -238,6 +240,7 @@ public final class VisionPlayerWindow implements AutoCloseable {
     public void showVideo(VideoStreamInfo streamInfo) {
         runOnEdt(() -> {
             connected = true;
+            videoError = null;
             connectionState = ConnectionState.CONNECTED;
             currentVideoStream = streamInfo;
             updateVideoAspect(streamInfo);
@@ -261,6 +264,7 @@ public final class VisionPlayerWindow implements AutoCloseable {
             connected = false;
             connectionState = ConnectionState.READY;
             currentVideoStream = null;
+            videoError = null;
             statusChip.setState(ConnectionState.READY);
             headerTitle.setText(i18n.tr("frame.receiver"));
             idleTitle.setText(i18n.tr("receiver.ready"));
@@ -280,7 +284,24 @@ public final class VisionPlayerWindow implements AutoCloseable {
     }
 
     private void updateVideoDetails(VideoStreamInfo streamInfo) {
-        videoDetails.setText(detailsText(streamInfo));
+        String text = videoError == null ? detailsText(streamInfo) : i18n.tr("video.error");
+        videoDetails.setText(text);
+        videoDetails.setToolTipText(videoError == null
+                ? i18n.tr("video.requested") + " " + config.advertisedWidth() + " x "
+                + config.advertisedHeight() + " @ " + config.fps() + " FPS"
+                : videoError);
+        if (detachedVideoWindow != null && connected) {
+            detachedVideoWindow.setStatusConnected(text);
+        }
+    }
+
+    public void showVideoError(String message) {
+        runOnEdt(() -> {
+            if (currentVideoStream != null) {
+                videoError = message;
+                updateVideoDetails(currentVideoStream);
+            }
+        });
     }
 
     private void updateVideoAspect(VideoStreamInfo streamInfo) {
@@ -290,15 +311,7 @@ public final class VisionPlayerWindow implements AutoCloseable {
     }
 
     private String detailsText(VideoStreamInfo streamInfo) {
-        int width = streamInfo.getWidth() > 0 ? streamInfo.getWidth() : config.advertisedWidth();
-        int height = streamInfo.getHeight() > 0 ? streamInfo.getHeight() : config.advertisedHeight();
-        double fps = streamInfo.getFps() > 0 ? streamInfo.getFps() : config.fps();
-        String codec = switch (streamInfo.getCodec()) {
-            case H264 -> "H.264";
-            case HEVC -> "HEVC";
-            case UNKNOWN -> i18n.tr("receiver.details.detecting");
-        };
-        return String.format(Locale.ROOT, "%d x %d  |  %.0f FPS  |  %s", width, height, fps, codec);
+        return VideoDetails.format(streamInfo, i18n);
     }
 
     public void setCloseToTray(boolean closeToTray) {
@@ -374,9 +387,11 @@ public final class VisionPlayerWindow implements AutoCloseable {
                     ? i18n.tr("receiver.ready") : i18n.tr("receiver.preparing"));
             idleSubtitle.setText(connectionState == ConnectionState.READY
                     ? config.receiverName() : i18n.tr("receiver.connecting"));
-            videoDetails.setText(currentVideoStream == null
-                    ? i18n.tr("video.waiting")
-                    : detailsText(currentVideoStream));
+            if (currentVideoStream == null) {
+                videoDetails.setText(i18n.tr("video.waiting"));
+            } else {
+                updateVideoDetails(currentVideoStream);
+            }
             detachedHint.setText(i18n.tr("video.detachedHint"));
             updateDetachControls();
             if (detachedVideoWindow != null) {

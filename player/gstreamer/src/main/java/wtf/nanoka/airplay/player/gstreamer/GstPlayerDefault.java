@@ -84,9 +84,11 @@ public class GstPlayerDefault extends GstPlayer {
         String sink = selectSink(selection);
         String codecToken = codecToken(codec);
         String sourceName = codec == VideoStreamInfo.Codec.H264 ? "h264-src" : "hevc-src";
-        return "appsrc name=" + sourceName + " ! " + codecToken + "parse config-interval=-1 "
-                + "! " + selection.decoder() + " "
-                + "! queue " + renderMode.queueProperties()
+        String decoderName = "auto".equalsIgnoreCase(normalize(configuredDecoder, "auto"))
+                ? "auto-video-decoder" : "video-decoder";
+        return "appsrc name=" + sourceName + " ! " + codecToken + "parse name=video-parser config-interval=-1 "
+                + "! " + selection.decoder() + " name=" + decoderName + " "
+                + "! queue name=video-output " + renderMode.queueProperties()
                 + " ! clocksync " + renderMode.clockSyncProperties() + " ! " + sink;
     }
 

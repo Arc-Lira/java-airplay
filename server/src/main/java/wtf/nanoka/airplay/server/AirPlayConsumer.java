@@ -30,6 +30,10 @@ public interface AirPlayConsumer {
 
     void onAudioSrcDisconnect();
 
+    /** Brings the receiver window to the front when the user launches it again. */
+    default void showWindow() {
+    }
+
     // HLS stuff, youtube
     default void onMediaPlaylist(String playlistUri) {
     }

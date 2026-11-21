@@ -5,12 +5,17 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.DefaultApplicationArguments;
 import org.springframework.context.support.GenericApplicationContext;
 import wtf.nanoka.airplay.app.PlayerApp;
+import wtf.nanoka.airplay.app.ReceiverInstanceLock;
 import wtf.nanoka.airplay.player.gstreamer.ui.ReceiverSettings;
+import wtf.nanoka.airplay.server.AirPlayConfig;
+import wtf.nanoka.airplay.server.AirPlayServer;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,7 +30,7 @@ class UserSettingsControllerTest {
     void persistsEveryEditableSettingAndPreservesUnknownProperties() throws Exception {
         Path settingsFile = temporaryDirectory.resolve("application.properties");
         Files.writeString(settingsFile, "logging.level.wtf.nanoka=DEBUG\n", StandardCharsets.UTF_8);
-        var controller = new UserSettingsController(null, settingsFile);
+        var controller = controller(null, settingsFile);
 
         var result = controller.save(validSettings());
 
@@ -54,7 +59,7 @@ class UserSettingsControllerTest {
                 valid.videoDecoder(), valid.gpuAdapter(), valid.videoQueueDepth(),
                 valid.aggressiveFrameDropping(), valid.renderMode());
 
-        var result = new UserSettingsController(null, settingsFile).save(invalid);
+        var result = controller(null, settingsFile).save(invalid);
 
         assertFalse(result.success());
         assertFalse(Files.exists(settingsFile));
@@ -66,8 +71,7 @@ class UserSettingsControllerTest {
             context.getBeanFactory().registerSingleton("applicationArguments",
                     new DefaultApplicationArguments("--airplay.serverName=Restarted Receiver"));
             context.refresh();
-            var controller = new UserSettingsController(context,
-                    temporaryDirectory.resolve("application.properties"));
+            var controller = controller(context, temporaryDirectory.resolve("application.properties"));
 
             var command = controller.currentRestartCommand();
 
@@ -76,6 +80,69 @@ class UserSettingsControllerTest {
             assertTrue(command.contains("--airplay.serverName=Restarted Receiver"));
             assertTrue(command.contains("-jar") || command.contains(PlayerApp.class.getName()));
         }
+    }
+
+    @Test
+    void readsTheFailureEvenAfterTheReplacementHasExited() throws Exception {
+        Path marker = temporaryDirectory.resolve("restart.ready");
+        String java = ProcessHandle.current().info().command().orElseThrow();
+        Process replacement = new ProcessBuilder(java, "-version")
+                .redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+        try {
+            String diagnostic = "Bonjour registration failed on WLAN";
+            RestartReadiness.signalFailure(marker, "attempt", replacement.pid(), diagnostic);
+            assertTrue(replacement.waitFor(10, TimeUnit.SECONDS));
+
+            var result = UserSettingsController.waitForReady(replacement, marker, "attempt", 1, TimeUnit.SECONDS);
+            assertFalse(result.success());
+            assertTrue(result.message().contains(diagnostic), result.message());
+
+            var stale = UserSettingsController.waitForReady(replacement, marker, "earlier-attempt", 1, TimeUnit.SECONDS);
+            assertFalse(stale.success());
+            assertFalse(stale.message().contains(diagnostic), stale.message());
+        } finally {
+            replacement.destroyForcibly();
+        }
+    }
+
+    @Test
+    void restartRollbackOnlyRestoresTheServerWhileHoldingTheInstanceLock() throws Exception {
+        Path profile = temporaryDirectory.resolve("profile");
+        try (var original = new ReceiverInstanceLock(profile);
+             var competing = new ReceiverInstanceLock(profile)) {
+            var controller = new UserSettingsController(null,
+                    temporaryDirectory.resolve("application.properties"), original);
+            assertTrue(original.acquire());
+            original.release();
+            assertTrue(competing.acquire());
+
+            AtomicInteger starts = new AtomicInteger();
+            AirPlayConfig config = new AirPlayConfig();
+            config.setIdentityFile(temporaryDirectory.resolve("identity.key").toString());
+            AirPlayServer server = new AirPlayServer(config, null) {
+                @Override
+                public synchronized void start() {
+                    assertTrue(original.isHeld(), "a restored server must own the instance lock");
+                    starts.incrementAndGet();
+                }
+            };
+
+            var blocked = controller.restoreAfterFailedRestart(server, true, "replacement did not become ready");
+            assertFalse(blocked.success());
+            assertTrue(blocked.message().contains("another process holds the instance lock"));
+            assertEquals(0, starts.get());
+
+            competing.release();
+            var restored = controller.restoreAfterFailedRestart(server, true, "replacement did not become ready");
+            assertFalse(restored.success(), "the replacement still failed to start");
+            assertTrue(restored.message().contains("The previous receiver was restored"));
+            assertEquals(1, starts.get());
+        }
+    }
+
+    private UserSettingsController controller(GenericApplicationContext context, Path settingsFile) {
+        return new UserSettingsController(context, settingsFile,
+                new ReceiverInstanceLock(temporaryDirectory.resolve("profile")));
     }
 
     private ReceiverSettings validSettings() {

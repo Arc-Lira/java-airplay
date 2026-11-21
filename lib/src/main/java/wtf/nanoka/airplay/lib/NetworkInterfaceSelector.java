@@ -53,18 +53,25 @@ public final class NetworkInterfaceSelector {
             List<Adapter> all,
             boolean automatic,
             boolean configuredMissing,
-            boolean usedVirtualFallback) {
+            boolean usedVirtualFallback,
+            List<Adapter> candidates) {
+
+        public Resolution(Adapter chosen, List<Adapter> all, boolean automatic,
+                          boolean configuredMissing, boolean usedVirtualFallback) {
+            this(chosen, all, automatic, configuredMissing, usedVirtualFallback,
+                    chosen == null ? List.of() : List.of(chosen));
+        }
 
         public Optional<String> warning() {
             if (chosen == null) {
                 return Optional.empty();
             }
             if (configuredMissing) {
-                return Optional.of("Configured AirPlay interface was not found; falling back to automatic selection: "
+                return Optional.of("Configured AirPlay interface was not found; trying automatic selection starting with "
                         + chosen.description());
             }
             if (usedVirtualFallback) {
-                return Optional.of("No physical LAN adapter was found; advertising AirPlay on virtual adapter "
+                return Optional.of("No physical LAN adapter was found; trying virtual adapter "
                         + chosen.description()
                         + ". iPhone may fail to connect. Choose a LAN adapter in Settings.");
             }
@@ -77,7 +84,7 @@ public final class NetworkInterfaceSelector {
             }
             String listed = String.join(", ", lan.stream().map(Adapter::description).toList());
             return Optional.of("Multiple LAN interfaces can advertise AirPlay (" + listed
-                    + "). Using " + chosen.description()
+                    + "). Trying " + chosen.description() + " first"
                     + " (airplay.networkInterface=auto). Pick one in Settings if iPhone cannot find this receiver.");
         }
     }
@@ -94,12 +101,23 @@ public final class NetworkInterfaceSelector {
         List<Adapter> unique = uniqueByInterface(adapters);
         boolean automatic = configured == null || configured.isBlank()
                 || AUTO.equalsIgnoreCase(configured.trim());
-        Adapter matched = automatic ? null : match(configured.trim(), unique);
+        String requested = automatic ? "" : configured.trim();
+        Adapter exactAddress = adapters.stream().filter(adapter -> requested.equals(adapter.ipv4()))
+                .findFirst().orElse(null);
+        Adapter matched = exactAddress != null ? exactAddress : matchInterface(requested, unique);
         boolean configuredMissing = !automatic && matched == null;
-        Adapter chosen = matched != null ? matched : pickAutomatic(unique, defaultRouteIpv4);
+        Comparator<Adapter> preference = preferenceOrder(defaultRouteIpv4);
+        Adapter chosen = matched != null ? matched : unique.stream().max(preference).orElse(null);
+        List<Adapter> candidates = exactAddress != null ? List.of(exactAddress) : adapters.stream()
+                .distinct()
+                .filter(adapter -> matched == null || adapter.name().equals(matched.name()))
+                .sorted(Comparator.comparing((Adapter adapter) -> adapter.equals(chosen))
+                        .thenComparing(preference).reversed())
+                .toList();
         boolean usedVirtualFallback = (automatic || configuredMissing)
                 && chosen != null && chosen.virtual();
-        return new Resolution(chosen, unique, automatic || configuredMissing, configuredMissing, usedVirtualFallback);
+        return new Resolution(chosen, unique, automatic || configuredMissing, configuredMissing,
+                usedVirtualFallback, candidates);
     }
 
     static List<Adapter> uniqueByInterface(List<Adapter> adapters) {
@@ -112,19 +130,13 @@ public final class NetworkInterfaceSelector {
         return List.copyOf(ordered);
     }
 
-    static Adapter pickAutomatic(List<Adapter> adapters, String defaultRouteIpv4) {
-        return adapters.stream()
-                .max(preferenceOrder(defaultRouteIpv4))
-                .orElse(null);
-    }
-
-    private static Adapter match(String configured, List<Adapter> adapters) {
-        String needle = configured.trim();
+    private static Adapter matchInterface(String needle, List<Adapter> adapters) {
+        if (needle.isEmpty()) {
+            return null;
+        }
         for (Adapter adapter : adapters) {
             if (needle.equalsIgnoreCase(adapter.name())
-                    || needle.equalsIgnoreCase(adapter.displayName())
-                    || needle.equals(adapter.ipv4())
-                    || needle.equalsIgnoreCase(adapter.id())) {
+                    || needle.equalsIgnoreCase(adapter.displayName())) {
                 return adapter;
             }
         }

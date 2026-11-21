@@ -12,14 +12,23 @@ public class AirPlayServer {
 
     private final AirPlayBonjour airPlayBonjour;
     private final ControlServer controlServer;
+    private final AirPlayConsumer airPlayConsumer;
     private boolean started;
 
     public AirPlayServer(AirPlayConfig airPlayConfig, AirPlayConsumer airPlayConsumer) {
+        this.airPlayConsumer = airPlayConsumer;
         try {
             airPlayConfig.validate();
             log.info("AirPlay display capability: {}x{} @ {} fps (configured: {}x{} @ {})",
                     airPlayConfig.getResolvedWidth(), airPlayConfig.getResolvedHeight(), airPlayConfig.getResolvedFps(),
                     airPlayConfig.getWidth(), airPlayConfig.getHeight(), airPlayConfig.getFps());
+            log.info("AirPlay video negotiation: H.264{}, actual resolution and frame rate are chosen by the sender",
+                    airPlayConfig.isHevc() ? " + HEVC" : " only");
+            if (!airPlayConfig.isHevc() && airPlayConfig.getResolvedHeight() > 1080) {
+                log.warn("A display height above 1080 is requested without HEVC. Some Apple senders need "
+                        + "airplay.hevc=true for higher-resolution mirroring; changing display size alone "
+                        + "does not enable HEVC or guarantee native screen resolution.");
+            }
             var identity = AirPlayIdentity.loadOrCreate(Path.of(airPlayConfig.getIdentityFile()));
             airPlayBonjour = new AirPlayBonjour(
                     airPlayConfig.getServerName(), identity, airPlayConfig.isHevc(),
@@ -51,6 +60,15 @@ public class AirPlayServer {
     public synchronized void stop() {
         started = false;
         stopComponents();
+    }
+
+    /** Surfaces the running receiver instead of starting a second instance. */
+    public void showWindow() {
+        try {
+            airPlayConsumer.showWindow();
+        } catch (RuntimeException e) {
+            log.warn("Unable to show the receiver window: {}", e.getMessage());
+        }
     }
 
     private void stopComponents() {

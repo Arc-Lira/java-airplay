@@ -1,5 +1,6 @@
 package wtf.nanoka.airplay.app.config;
 
+import wtf.nanoka.airplay.app.ReceiverInstanceLock;
 import wtf.nanoka.airplay.app.menu.SystemTrayMenu;
 import wtf.nanoka.airplay.player.ffmpeg.FFmpegPlayer;
 import wtf.nanoka.airplay.player.gstreamer.GstPlayerDefault;
@@ -80,8 +81,8 @@ public class PlayerConfig {
     }
 
     @Bean
-    public SettingsController settingsController(ApplicationContext context) {
-        return new UserSettingsController(context);
+    public SettingsController settingsController(ApplicationContext context, ReceiverInstanceLock instanceLock) {
+        return new UserSettingsController(context, instanceLock);
     }
 
     @Bean

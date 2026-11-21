@@ -9,6 +9,8 @@ import org.freedesktop.gstreamer.elements.AppSrc;
 import org.freedesktop.gstreamer.glib.GLib;
 
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.LinkedBlockingDeque;
 
@@ -48,8 +50,10 @@ public abstract class GstPlayer implements AirPlayConsumer, AutoCloseable {
     private volatile Pipeline activeVideoPipeline;
     private volatile AppSrc activeVideoSrc;
     private volatile VideoStreamInfo.Codec activeVideoCodec = VideoStreamInfo.Codec.UNKNOWN;
+    private volatile VideoStreamInfo detectedVideoFormat;
+    // Only accessed under videoTransitionLock. Restore the auto choice on disconnect.
+    private final Map<Pipeline, String> softwareFallbacks = new HashMap<>();
     private byte[] videoParameterSets;
-    private boolean prependVideoParameterSets;
     private boolean awaitingVideoKeyframe;
     private volatile long videoGeneration;
     protected final Object videoTransitionLock = new Object();
@@ -97,6 +101,10 @@ public abstract class GstPlayer implements AirPlayConsumer, AutoCloseable {
         if (hevcSrc != null) {
             configureVideoSource(hevcSrc,
                     "video/x-h265,stream-format=(string)byte-stream,alignment=(string)au");
+        }
+        monitorVideoPipeline(h264Pipeline, VideoStreamInfo.Codec.H264);
+        if (hevcPipeline != null) {
+            monitorVideoPipeline(hevcPipeline, VideoStreamInfo.Codec.HEVC);
         }
 
         alacPipeline = (Pipeline) Gst.parseLaunch("appsrc name=alac-src ! avdec_alac ! audioconvert "
@@ -146,8 +154,52 @@ public abstract class GstPlayer implements AirPlayConsumer, AutoCloseable {
     @Override
     public void onVideoFormatDetected(VideoStreamInfo videoStreamInfo) {
         if (videoStreamInfo.getCodec() != VideoStreamInfo.Codec.UNKNOWN) {
-            activateVideoPipeline(videoStreamInfo.getCodec());
+            synchronized (videoTransitionLock) {
+                VideoStreamInfo previousFormat = detectedVideoFormat;
+                detectedVideoFormat = videoStreamInfo;
+                Pipeline pipeline = videoStreamInfo.getCodec() == VideoStreamInfo.Codec.H264
+                        ? h264Pipeline : hevcPipeline;
+                boolean sizeChanged = previousFormat == null
+                        || previousFormat.getCodec() != videoStreamInfo.getCodec()
+                        || previousFormat.getWidth() != videoStreamInfo.getWidth()
+                        || previousFormat.getHeight() != videoStreamInfo.getHeight();
+                if (!closed && pipeline != null && sizeChanged
+                        && GstDecoderSupport.needsSoftwareDecoder(pipeline, videoStreamInfo)) {
+                    Pipeline previous;
+                    synchronized (this) {
+                        previous = invalidateVideoPipeline();
+                        videoParameterSets = null;
+                    }
+                    StateChangeReturn stopped = stopAndDrainVideoPipeline(previous);
+                    if (previous != pipeline) {
+                        stopped = pipeline.stop();
+                    }
+                    if (stopped == StateChangeReturn.FAILURE) {
+                        throw new IllegalStateException("Unable to stop the video pipeline before decoder replacement");
+                    }
+                    softwareFallbacks.put(pipeline, GstDecoderSupport.useSoftwareDecoder(pipeline, videoStreamInfo));
+                }
+                activateVideoPipeline(videoStreamInfo.getCodec());
+            }
         }
+    }
+
+    private void monitorVideoPipeline(Pipeline pipeline, VideoStreamInfo.Codec codec) {
+        pipeline.getBus().connect((Bus.ERROR) (source, code, message) -> {
+            if (closed || activeVideoPipeline != pipeline) {
+                return;
+            }
+            String details = "GStreamer " + codec + " error from " + source.getName()
+                    + " (" + code + "): " + message;
+            log.error("{}; sender format: {}. Try the software decoder (avdec_h264, GPU auto) "
+                    + "or a lower display profile, then reconnect.", details, detectedVideoFormat);
+            onVideoPlaybackError(details);
+        });
+        pipeline.getBus().connect((Bus.WARNING) (source, code, message) ->
+                log.warn("GStreamer {} warning from {} ({}): {}", codec, source.getName(), code, message));
+    }
+
+    protected void onVideoPlaybackError(String message) {
     }
 
     @Override
@@ -170,17 +222,16 @@ public abstract class GstPlayer implements AirPlayConsumer, AutoCloseable {
             if (detectedParameterSets != null) {
                 videoParameterSets = detectedParameterSets;
             }
-            if (awaitingVideoKeyframe && !containsRandomAccessUnit(bytes, activeVideoCodec)) {
-                return;
-            }
             byte[] accessUnit = bytes;
-            if (prependVideoParameterSets) {
+            if (awaitingVideoKeyframe) {
+                if (!containsRandomAccessUnit(bytes, activeVideoCodec)) {
+                    return;
+                }
                 if (detectedParameterSets == null && videoParameterSets != null) {
                     accessUnit = concatenate(videoParameterSets, bytes);
                 }
-                prependVideoParameterSets = false;
+                awaitingVideoKeyframe = false;
             }
-            awaitingVideoKeyframe = false;
             media = new TimedMedia(accessUnit, timestamp, activeVideoSrc, videoGeneration);
         }
         try {
@@ -468,7 +519,6 @@ public abstract class GstPlayer implements AirPlayConsumer, AutoCloseable {
                 }
                 if (activeVideoCodec != codec) {
                     videoParameterSets = null;
-                    prependVideoParameterSets = false;
                 }
                 awaitingVideoKeyframe = true;
                 videoGeneration++;
@@ -500,11 +550,27 @@ public abstract class GstPlayer implements AirPlayConsumer, AutoCloseable {
             synchronized (this) {
                 pipeline = invalidateVideoPipeline();
                 activeVideoCodec = VideoStreamInfo.Codec.UNKNOWN;
+                detectedVideoFormat = null;
                 videoParameterSets = null;
-                prependVideoParameterSets = false;
                 awaitingVideoKeyframe = false;
             }
-            stopAndDrainVideoPipeline(pipeline);
+            StateChangeReturn stopped = stopAndDrainVideoPipeline(pipeline);
+            if (!closed) {
+                softwareFallbacks.entrySet().removeIf(entry -> {
+                    Pipeline fallback = entry.getKey();
+                    try {
+                        StateChangeReturn state = fallback == pipeline ? stopped : fallback.stop();
+                        if (state == StateChangeReturn.FAILURE) {
+                            throw new IllegalStateException("Unable to stop the video pipeline");
+                        }
+                        GstDecoderSupport.restoreHardwareDecoder(fallback, entry.getValue());
+                        return true;
+                    } catch (RuntimeException error) {
+                        log.warn("Unable to restore {} for the next video session", entry.getValue(), error);
+                        return false;
+                    }
+                });
+            }
         }
     }
 
@@ -542,12 +608,6 @@ public abstract class GstPlayer implements AirPlayConsumer, AutoCloseable {
                 previous = invalidateVideoPipeline();
             }
             stopAndDrainVideoPipeline(previous);
-            synchronized (this) {
-                if (closed) {
-                    return false;
-                }
-                prependVideoParameterSets = videoParameterSets != null;
-            }
             activateVideoPipeline(codec);
             return true;
         }
@@ -562,10 +622,8 @@ public abstract class GstPlayer implements AirPlayConsumer, AutoCloseable {
         return pipeline;
     }
 
-    protected void stopAndDrainVideoPipeline(Pipeline pipeline) {
-        if (pipeline != null) {
-            pipeline.stop();
-        }
+    protected StateChangeReturn stopAndDrainVideoPipeline(Pipeline pipeline) {
+        StateChangeReturn stopped = pipeline == null ? StateChangeReturn.SUCCESS : pipeline.stop();
         boolean interrupted = false;
         synchronized (this) {
             while (videoPushesInFlight > 0) {
@@ -579,6 +637,7 @@ public abstract class GstPlayer implements AirPlayConsumer, AutoCloseable {
         if (interrupted) {
             Thread.currentThread().interrupt();
         }
+        return stopped;
     }
 
     private void stopAndClose(Element element) {
@@ -675,7 +734,6 @@ public abstract class GstPlayer implements AirPlayConsumer, AutoCloseable {
                 pipeline = invalidateVideoPipeline();
                 activeVideoCodec = VideoStreamInfo.Codec.UNKNOWN;
                 videoParameterSets = null;
-                prependVideoParameterSets = false;
             }
             stopAndDrainVideoPipeline(pipeline);
         }

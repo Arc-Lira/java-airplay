@@ -38,11 +38,11 @@ public class AirPlayConfig {
     }
 
     public int getResolvedWidth() {
-        return resolve(width, "airplay.width", 320, 7680, 1920);
+        return resolve(width, "airplay.width", 320, 7680, hevc ? 3840 : 1920);
     }
 
     public int getResolvedHeight() {
-        return resolve(height, "airplay.height", 240, 4320, 1080);
+        return resolve(height, "airplay.height", 240, 4320, hevc ? 2160 : 1080);
     }
 
     public int getResolvedFps() {

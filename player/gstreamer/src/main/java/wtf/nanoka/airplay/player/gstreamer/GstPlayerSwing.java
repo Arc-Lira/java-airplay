@@ -149,6 +149,11 @@ public class GstPlayerSwing extends GstPlayer {
     }
 
     @Override
+    protected void onVideoPlaybackError(String message) {
+        window.showVideoError(message);
+    }
+
+    @Override
     public void onVideoFormatDetected(VideoStreamInfo videoStreamInfo) {
         window.showVideoFormatDetected(videoStreamInfo);
         super.onVideoFormatDetected(videoStreamInfo);

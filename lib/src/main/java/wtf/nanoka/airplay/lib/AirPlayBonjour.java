@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import javax.jmdns.JmDNS;
 import javax.jmdns.ServiceInfo;
+import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.ArrayList;
@@ -27,58 +28,92 @@ public class AirPlayBonjour {
     private final boolean hevcEnabled;
     private final String networkInterface;
 
-    private final List<JmDNS> jmDNSList = new ArrayList<>();
+    private Closeable registration;
 
-    public synchronized void start(int airTunesPort) throws Exception {
-        if (!jmDNSList.isEmpty()) {
+    public synchronized void start(int airTunesPort) throws RegistrationException {
+        if (registration == null) {
+            start(airTunesPort, NetworkInterfaceSelector.resolve(networkInterface), this::registerOn);
+        }
+    }
+
+    synchronized void start(int airTunesPort, NetworkInterfaceSelector.Resolution resolution,
+                            AdapterRegistration open) throws RegistrationException {
+        if (registration != null) {
             return;
         }
-        List<JmDNS> startedServices = new ArrayList<>();
-        String mac = identity.getDeviceId();
-        try {
-            NetworkInterfaceSelector.Resolution resolution = NetworkInterfaceSelector.resolve(networkInterface);
-            resolution.warning().ifPresent(log::warn);
-            if (resolution.chosen() == null) {
-                throw new IOException("No network interface accepted the AirPlay Bonjour services");
-            }
-            InetAddress inetAddress = InetAddress.getByName(resolution.chosen().ipv4());
-            JmDNS jmDNS = null;
-            try {
-                jmDNS = JmDNS.create(inetAddress);
-                jmDNS.registerService(ServiceInfo.create(serverName + AIRPLAY_SERVICE_TYPE,
-                        serverName, airTunesPort, 0, 0, airPlayMDNSProps(mac)));
-                log.info("{} service is registered on {} ({})", serverName + AIRPLAY_SERVICE_TYPE,
-                        resolution.chosen().description(), airTunesPort);
+        resolution.warning().ifPresent(log::warn);
+        if (resolution.candidates().isEmpty()) {
+            throw new RegistrationException("Bonjour could not start: no active network adapter with an IPv4 address was found.",
+                    List.of());
+        }
 
-                String airTunesServerName = mac.replaceAll(":", "") + "@" + serverName;
-                jmDNS.registerService(ServiceInfo.create(airTunesServerName + AIRTUNES_SERVICE_TYPE,
-                        airTunesServerName, airTunesPort, 0, 0, airTunesMDNSProps()));
-                log.info("{} service is registered on {} ({})", airTunesServerName + AIRTUNES_SERVICE_TYPE,
-                        resolution.chosen().description(), airTunesPort);
-                startedServices.add(jmDNS);
-            } catch (Exception e) {
-                close(jmDNS);
-                throw new IOException("Unable to register AirPlay services on "
-                        + resolution.chosen().description() + ": " + e.getMessage(), e);
+        List<IOException> failures = new ArrayList<>();
+        for (var adapter : resolution.candidates()) {
+            try {
+                registration = open.register(adapter, airTunesPort);
+            } catch (IOException | SecurityException e) {
+                String detail = adapter.description() + ": " + e;
+                log.warn("Unable to register AirPlay services on {}", detail);
+                failures.add(new IOException(detail, e));
+                continue;
             }
-            jmDNSList.addAll(startedServices);
-        } catch (Exception e) {
-            startedServices.forEach(this::close);
-            throw e;
+
+            if (!failures.isEmpty()) {
+                if (adapter.virtual()) {
+                    log.warn("Bonjour registered on virtual adapter {} after {} failed attempt(s). "
+                                    + "iPhone may be unable to reach this adapter.",
+                            adapter.description(), failures.size());
+                } else {
+                    log.info("Bonjour selected {} after {} failed registration attempt(s)",
+                            adapter.description(), failures.size());
+                }
+            }
+            return;
+        }
+        int mdnsPort = Integer.getInteger("net.mdns.port", 5353);
+        throw new RegistrationException("Bonjour could not register AirPlay on any selected network adapter "
+                + "(mDNS UDP " + mdnsPort + ").", failures);
+    }
+
+    private Closeable registerOn(NetworkInterfaceSelector.Adapter adapter, int airTunesPort) throws IOException {
+        String mac = identity.getDeviceId();
+        String airTunesServerName = mac.replaceAll(":", "") + "@" + serverName;
+        ServiceInfo airPlay = ServiceInfo.create(serverName + AIRPLAY_SERVICE_TYPE,
+                serverName, airTunesPort, 0, 0, airPlayMDNSProps(mac));
+        ServiceInfo airTunes = ServiceInfo.create(airTunesServerName + AIRTUNES_SERVICE_TYPE,
+                airTunesServerName, airTunesPort, 0, 0, airTunesMDNSProps());
+        JmDNS jmDNS = JmDNS.create(InetAddress.getByName(adapter.ipv4()));
+        boolean registered = false;
+        try {
+            jmDNS.registerService(airPlay);
+            jmDNS.registerService(airTunes);
+            log.info("{} service is registered on {} ({})", serverName + AIRPLAY_SERVICE_TYPE,
+                    adapter.description(), airTunesPort);
+            log.info("{} service is registered on {} ({})", airTunesServerName + AIRTUNES_SERVICE_TYPE,
+                    adapter.description(), airTunesPort);
+            registered = true;
+            return () -> close(jmDNS);
+        } finally {
+            if (!registered) {
+                close(jmDNS);
+            }
         }
     }
 
     public synchronized void stop() {
-        for (final JmDNS jmDNS : jmDNSList) {
-            close(jmDNS);
+        if (registration == null) {
+            return;
         }
-        jmDNSList.clear();
+        try {
+            registration.close();
+        } catch (IOException e) {
+            log.debug("Unable to close Bonjour registration: {}", e.getMessage(), e);
+        } finally {
+            registration = null;
+        }
     }
 
     private void close(JmDNS jmDNS) {
-        if (jmDNS == null) {
-            return;
-        }
         try {
             jmDNS.unregisterAllServices();
         } catch (RuntimeException e) {
@@ -89,6 +124,19 @@ public class AirPlayBonjour {
             } catch (IOException | RuntimeException e) {
                 log.debug("Unable to close mDNS service: {}", e.getMessage());
             }
+        }
+    }
+
+    @FunctionalInterface
+    interface AdapterRegistration {
+        Closeable register(NetworkInterfaceSelector.Adapter adapter, int port) throws IOException;
+    }
+
+    public static final class RegistrationException extends IOException {
+        private RegistrationException(String summary, List<IOException> failures) {
+            super(summary + (failures.isEmpty() ? "" : "\n"
+                    + String.join("\n", failures.stream().map(IOException::getMessage).toList())));
+            failures.forEach(this::addSuppressed);
         }
     }
 

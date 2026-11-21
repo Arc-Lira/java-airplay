@@ -67,6 +67,17 @@ class NetworkInterfaceSelectorTest {
     }
 
     @Test
+    void preservesAnExplicitSecondaryIpv4Address() {
+        var secondary = new NetworkInterfaceSelector.Adapter(WIFI.name(), WIFI.displayName(),
+                "192.168.0.10", false, false, true);
+        var resolution = NetworkInterfaceSelector.resolve(secondary.ipv4(), List.of(WIFI, secondary), WIFI.ipv4());
+
+        assertEquals(secondary, resolution.chosen());
+        assertEquals(List.of(secondary), resolution.candidates());
+        assertFalse(resolution.automatic());
+    }
+
+    @Test
     void missingConfiguredAdapterFallsBackToAuto() {
         var resolution = NetworkInterfaceSelector.resolve("USB Ethernet", List.of(WIFI, WSL), null);
 

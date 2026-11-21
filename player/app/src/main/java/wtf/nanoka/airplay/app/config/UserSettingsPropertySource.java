@@ -25,7 +25,7 @@ public final class UserSettingsPropertySource
         return settingsFile(null);
     }
 
-    static Path settingsFile(Environment environment) {
+    public static Path settingsFile(Environment environment) {
         String configured = environment == null
                 ? System.getProperty(SETTINGS_FILE_PROPERTY)
                 : environment.getProperty(SETTINGS_FILE_PROPERTY);

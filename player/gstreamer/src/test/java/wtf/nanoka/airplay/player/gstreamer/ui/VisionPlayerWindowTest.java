@@ -34,4 +34,24 @@ class VisionPlayerWindowTest {
 
         assertEquals(new Rectangle(131, 0, 338, 600), canvas.getBounds());
     }
+
+    @Test
+    void preservesIpadAspectRatioWhenRotatingInTheSameWindow() {
+        var panel = new VisionPlayerWindow.VideoSurfacePanel();
+        var canvas = new Canvas();
+        panel.add(canvas);
+        panel.setSize(1000, 600);
+
+        panel.setAspectRatio(2732, 2048);
+        panel.doLayout();
+        assertEquals(new Rectangle(100, 0, 800, 600), canvas.getBounds());
+
+        panel.setAspectRatio(2048, 2732);
+        panel.doLayout();
+        assertEquals(new Rectangle(275, 0, 450, 600), canvas.getBounds());
+
+        panel.setAspectRatio(2048, 1536);
+        panel.doLayout();
+        assertEquals(new Rectangle(100, 0, 800, 600), canvas.getBounds());
+    }
 }

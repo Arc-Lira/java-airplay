@@ -51,7 +51,7 @@ start.bat
 可执行 JAR 生成位置：
 
 ```text
-player/app/build/libs/java-airplay-server-1.1.2.jar
+player/app/build/libs/java-airplay-server-1.1.3.jar
 ```
 
 ## 桌面界面
@@ -79,16 +79,43 @@ ${user.home}/.java-airplay/application.properties
 | 配置项 | 默认值 | 说明 |
 |---|---:|---|
 | `airplay.serverName` | `Java AirPlay` | 在 iPhone“屏幕镜像”列表中显示的名称 |
-| `airplay.width` / `airplay.height` | `1920` / `1080` | 向发送端声明的显示能力，填写 `auto` 可检测实际视频流 |
+| `airplay.width` / `airplay.height` | `1920` / `1080` | 请求的显示尺寸；`auto` 声明 1920×1080，开启 HEVC 后声明 3840×2160 |
 | `airplay.fps` | `60` | 向发送端声明的最大帧率，实际发送帧率由时间戳测量 |
 | `airplay.requirePairing` | `true` | 接收媒体前是否要求完成 AirPlay 配对 |
 | `airplay.hevc` | `false` | 启用实验性 HEVC 协商 |
-| `airplay.networkInterface` | `auto` | AirPlay 发现使用的网卡；auto 会跳过虚拟网卡 |
+| `airplay.networkInterface` | `auto` | AirPlay 发现使用的网卡。自动模式优先尝试物理网卡，Bonjour 注册失败时尝试下一块 |
 | `player.gstreamer.renderMode` | `balanced` | 选择 balanced、quality 或 low-latency 呈现模式 |
 | `player.gstreamer.videoQueueDepth` | `2` | Java 侧缓存的编码视频访问单元数量 |
 | `player.gstreamer.aggressiveFrameDropping` | `false` | 实验性模式，拥塞时丢弃编码帧 |
 
 默认启用安全视频路径。除非你更重视最低延迟而不是画面完整性，否则请保持 `player.gstreamer.aggressiveFrameDropping=false`。丢弃 H.264/HEVC 参考帧可能导致花屏，并持续到发送端重新连接。
+
+### 分辨率、清晰度与高分辨率投屏
+
+iPhone 14 Pro Max 的物理屏幕为 1290×2796，但 AirPlay 发送的是由 iOS 选择尺寸的压缩视频流。接收器默认请求 1920×1080，在电脑上放大显示不能恢复已经丢失的细节。设置中的尺寸是显示能力请求，不能强制手机按原生像素采集；实际横屏、竖屏尺寸也可能与请求不同。
+
+希望尝试更清晰的画面，可使用 GStreamer 后端，按下面的配置**保存并重启**，然后在 iPhone 上重新连接：
+
+```properties
+airplay.width=2560
+airplay.height=1440
+airplay.fps=60
+airplay.hevc=true
+```
+
+HEVC 为实验性功能，可让支持的 Apple 发送端协商更高分辨率。是否使用它由设备、iOS 和连接条件决定，单纯填写更大的数字不能保证原生像素投屏。开启 HEVC 后，将宽高都设为 `auto` 会请求 3840×2160；开启 HEVC 不会覆盖显式填写的宽高，也**不会限制为 30fps**，`airplay.fps=auto` 同样请求 60fps。实测帧率可能更低，静止画面尤其如此。「画质优先」呈现模式改变的是播放时序，不会提高手机的编码码率或分辨率。
+
+视频底部状态栏显示**实际检测到的视频尺寸和实测帧率**，尚未检测到的值显示为等待检测；鼠标悬停可另行查看请求的显示能力。独立视频窗口同步更新这些信息。
+
+以上也适用于 **iPad**，没有写死 iPhone 尺寸或强制按 16:9 显示：画面比例取自收到的视频流，兼容接近 4:3 的 iPad 和横竖屏旋转。例如 2732×2048 的 iPad 可以请求该尺寸并设置 `airplay.fps=60`、开启 HEVC，但实际发送尺寸仍由 iPadOS 决定。开启 HEVC 会保留 H.264 管线供旧款 iPad 使用。原生回归测试覆盖 2048×1536 H.264、2732×2048 / 2048×2732 H.264 与 HEVC，以及同一连接内旋转；这些是生成视频流测试，不代表已经逐一实测所有 iPad 真机。
+
+如果 1080 正常、提高分辨率后黑屏：
+
+- 先查看日志中的 `Detected sender video format`。若连视频编码配置都没有收到，应先排查发送端协商，尝试开启 HEVC 或使用 1920×1080 档位。
+- 自动选择 D3D11/D3D12 时，会检查实际视频的宽、高是否均在解码器能力内，包括竖屏。尺寸不支持时改用软件解码，不缩小视频。
+- 驱动仍可能在声明支持的范围内解码失败。GStreamer 错误会写入应用日志并显示在视频状态栏；可将解码器设为 `avdec_h264`、GPU 设为 `auto` 后重新连接。开启 HEVC 时会自动使用对应的 `avdec_h265`。高分辨率 60fps 的软解需要足够的 CPU 性能。
+
+[UxPlay 的镜像说明](https://github.com/FDH2/UxPlay#usage)也说明了发送端决定实际尺寸，以及高分辨率下可选 HEVC 的协商机制。H.264 编码本身并不限于 1080p。
 
 ## 网络与安全说明
 
@@ -97,6 +124,20 @@ ${user.home}/.java-airplay/application.properties
 - 默认开启配对。请妥善保管 identity 文件，除非需要让接收器作为新设备重新配对，否则不要删除它。
 - 请仅在可信网络中使用接收器。
 - 本项目实现的是传统屏幕镜像传输，不是完整 AirPlay 2。受保护的 Apple TV 内容和多房间功能不在支持范围内。
+
+### 手机列表里找不到接收器
+
+先确认日志中出现 `service is registered on`，并记下它报告的网卡和 IP。如果这台电脑上还开着另一份 Java AirPlay（包括旧版本目录里的程序），mDNS 无法合并同名服务：后启动的实例会被改名成 `Java AirPlay (2)`、`(3)`，手机可能只看到指向旧随机端口的过期记录，于是表现为"找不到"或连不上。
+
+如果启动时提示 Bonjour 失败，先看提示中的网卡地址和具体错误。可以重连局域网，或在用户设置文件中将 `airplay.networkInterface` 改为与手机同网的网卡名称或当前 IPv4 地址。手动指定的网卡存在时，程序只尝试这一块。
+
+自 1.1.3 起，同一用户目录下只允许运行一个接收器实例。再次启动会直接退出，并让已运行的窗口回到前台，日志会写明 `Refusing to start a second receiver instance (PID ...)`。如果在旧版本中遇到此问题，请先在任务管理器结束多余的 `java.exe`，或在托盘菜单退出后重新启动。
+
+若日志已有注册记录但手机仍然看不到：
+
+- 确认手机和电脑在同一子网；电脑有线、手机 Wi-Fi 时，路由器可能开启了 AP 隔离或访客网络。
+- 防火墙需要允许 UDP `5353` 和接收器的临时 TCP 端口。
+- 存在多块网卡时，在「设置 → 网络接口」中手动选择实际连接手机的那块网卡。
 
 ## 构建与测试
 

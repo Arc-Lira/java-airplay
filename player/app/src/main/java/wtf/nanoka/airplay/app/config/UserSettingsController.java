@@ -5,6 +5,7 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.SpringApplication;
 import org.springframework.context.ApplicationContext;
 import wtf.nanoka.airplay.app.PlayerApp;
+import wtf.nanoka.airplay.app.ReceiverInstanceLock;
 import wtf.nanoka.airplay.player.gstreamer.ui.ReceiverSettings;
 import wtf.nanoka.airplay.player.gstreamer.ui.SettingsController;
 import wtf.nanoka.airplay.player.gstreamer.GstPlayerDefault;
@@ -37,22 +38,25 @@ public final class UserSettingsController implements SettingsController {
     private final ApplicationContext applicationContext;
     private final Path settingsFile;
     private final boolean validateNativeRuntime;
+    private final ReceiverInstanceLock instanceLock;
     private final AtomicBoolean restarting = new AtomicBoolean();
     private final AtomicBoolean restartUnlockDeferred = new AtomicBoolean();
 
-    UserSettingsController(ApplicationContext applicationContext) {
+    UserSettingsController(ApplicationContext applicationContext, ReceiverInstanceLock instanceLock) {
         this(applicationContext,
-                UserSettingsPropertySource.settingsFile(applicationContext.getEnvironment()), true);
+                UserSettingsPropertySource.settingsFile(applicationContext.getEnvironment()), instanceLock, true);
     }
 
-    UserSettingsController(ApplicationContext applicationContext, Path settingsFile) {
-        this(applicationContext, settingsFile, false);
+    UserSettingsController(ApplicationContext applicationContext, Path settingsFile,
+                           ReceiverInstanceLock instanceLock) {
+        this(applicationContext, settingsFile, instanceLock, false);
     }
 
     private UserSettingsController(ApplicationContext applicationContext, Path settingsFile,
-                                   boolean validateNativeRuntime) {
+                                   ReceiverInstanceLock instanceLock, boolean validateNativeRuntime) {
         this.applicationContext = applicationContext;
         this.settingsFile = settingsFile.toAbsolutePath().normalize();
+        this.instanceLock = instanceLock;
         this.validateNativeRuntime = validateNativeRuntime;
     }
 
@@ -119,6 +123,8 @@ public final class UserSettingsController implements SettingsController {
             airPlayServer = applicationContext.getBean(AirPlayServer.class);
             serverStopAttempted = true;
             airPlayServer.stop();
+            // The replacement process must be able to take over the single-instance lock.
+            instanceLock.release();
 
             readyFile = Files.createTempFile("java-airplay-restart-", ".ready");
             Files.deleteIfExists(readyFile);
@@ -129,14 +135,15 @@ public final class UserSettingsController implements SettingsController {
             processBuilder.environment().put(RESTART_READY_FILE_ENV, readyFile.toString());
             processBuilder.environment().put(RESTART_READY_TOKEN_ENV, readyToken);
             replacement = processBuilder.start();
-            if (!waitForReady(replacement, readyFile, readyToken, 30, TimeUnit.SECONDS)) {
+            Result readiness = waitForReady(replacement, readyFile, readyToken, 30, TimeUnit.SECONDS);
+            if (!readiness.success()) {
                 if (!terminateAndWait(replacement)) {
                     deferRestartUnlock(replacement);
-                    return Result.failure("Settings were saved, but the replacement process could not be terminated. "
+                    return Result.failure("Settings were saved, but " + readiness.message()
+                            + ". The replacement process could not be terminated. "
                             + "The previous receiver was not restored to avoid a port conflict.");
                 }
-                return restoreAfterFailedRestart(airPlayServer, serverStopAttempted,
-                        "the replacement process did not become ready");
+                return restoreAfterFailedRestart(airPlayServer, serverStopAttempted, readiness.message());
             }
         } catch (Exception e) {
             boolean replacementTerminated = replacement == null || terminateAndWait(replacement);
@@ -214,24 +221,31 @@ public final class UserSettingsController implements SettingsController {
         });
     }
 
-    private boolean waitForReady(Process process, Path readyFile, String token, long timeout, TimeUnit unit)
+    static Result waitForReady(Process process, Path readyFile, String token, long timeout, TimeUnit unit)
             throws InterruptedException {
         long deadline = System.nanoTime() + unit.toNanos(timeout);
         long readySince = Long.MIN_VALUE;
-        while (System.nanoTime() < deadline) {
-            if (RestartReadiness.matches(readyFile, token, process.pid()) && process.isAlive()) {
+        while (true) {
+            // Once the process has exited its final diagnostic is already on disk.
+            boolean alive = process.isAlive();
+            var status = RestartReadiness.read(readyFile, token, process.pid());
+            if (status.failure() != null) {
+                return Result.failure("the replacement process reported: " + status.failure());
+            }
+            if (!alive || System.nanoTime() >= deadline) {
+                return Result.failure("the replacement process did not become ready");
+            }
+            if (status.ready()) {
                 if (readySince == Long.MIN_VALUE) {
                     readySince = System.nanoTime();
-                } else if (System.nanoTime() - readySince >= TimeUnit.MILLISECONDS.toNanos(500)) {
-                    return true;
+                } else if (System.nanoTime() - readySince >= TimeUnit.MILLISECONDS.toNanos(500) && process.isAlive()) {
+                    return Result.success("Ready");
                 }
-            }
-            if (!process.isAlive()) {
-                return false;
+            } else {
+                readySince = Long.MIN_VALUE;
             }
             Thread.sleep(100);
         }
-        return false;
     }
 
     private boolean terminateAndWait(Process process) {
@@ -265,13 +279,17 @@ public final class UserSettingsController implements SettingsController {
         return !process.isAlive();
     }
 
-    private Result restoreAfterFailedRestart(AirPlayServer airPlayServer, boolean serverStopAttempted,
-                                             String reason) {
+    Result restoreAfterFailedRestart(AirPlayServer airPlayServer, boolean serverStopAttempted, String reason) {
         String suffix = "";
         if (serverStopAttempted && airPlayServer != null) {
             try {
-                airPlayServer.start();
-                suffix = " The previous receiver was restored.";
+                if (instanceLock.acquire()) {
+                    airPlayServer.start();
+                    suffix = " The previous receiver was restored.";
+                } else {
+                    log.warn("Another process acquired the instance lock during restart");
+                    suffix = " The previous receiver was not restored because another process holds the instance lock.";
+                }
             } catch (Exception restoreError) {
                 log.error("Unable to restore the AirPlay server after restart failure", restoreError);
                 suffix = " The previous receiver could not be restored.";

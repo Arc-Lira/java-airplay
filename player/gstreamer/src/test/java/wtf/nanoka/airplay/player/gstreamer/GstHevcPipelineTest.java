@@ -28,7 +28,7 @@ class GstHevcPipelineTest {
         String configuredPipeline = GstPlayerDefault.createPipelineDescription(
                 VideoStreamInfo.Codec.HEVC, "avdec_h264", "auto", "balanced");
         assertTrue(configuredPipeline.contains("appsrc name=hevc-src ! h265parse"));
-        assertTrue(configuredPipeline.contains("! avdec_h265 ! queue"));
+        assertTrue(configuredPipeline.contains("! avdec_h265 name=video-decoder ! queue"));
         assertTrue(configuredPipeline.contains("sync=true"));
         try (Pipeline configured = (Pipeline) Gst.parseLaunch(configuredPipeline)) {
             assertTrue(configured.getElementByName("hevc-src") != null);
